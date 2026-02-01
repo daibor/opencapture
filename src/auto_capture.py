@@ -64,9 +64,20 @@ class WindowTracker:
                 if error == 0 and title:
                     return str(title)
 
-            return "Unknown"
+            # 备选：尝试获取所有窗口的第一个标题
+            error, windows = Quartz.AXUIElementCopyAttributeValue(
+                app_ref, Quartz.kAXWindowsAttribute, None
+            )
+            if error == 0 and windows and len(windows) > 0:
+                error, title = Quartz.AXUIElementCopyAttributeValue(
+                    windows[0], Quartz.kAXTitleAttribute, None
+                )
+                if error == 0 and title:
+                    return str(title)
+
+            return ""
         except Exception:
-            return "Unknown"
+            return ""
 
     def _handle_app_activation(self, notification):
         """处理应用激活通知"""
@@ -197,7 +208,10 @@ class KeyLogger:
             timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
             separator = "=" * 80
-            header = f"\n{separator}\n[{timestamp}] {app_name} | {window_title}\n"
+            if window_title:
+                header = f"\n{separator}\n[{timestamp}] {app_name} | {window_title}\n"
+            else:
+                header = f"\n{separator}\n[{timestamp}] {app_name}\n"
             header += f"                      {bundle_id}\n{separator}\n"
 
             log_file = self._get_log_file()
@@ -238,17 +252,35 @@ class KeyLogger:
 
 
 class MouseCapture:
-    """鼠标点击截图"""
+    """鼠标行为截图 - 支持单击、双击、拖拽"""
 
-    THROTTLE_MS = 100  # 节流间隔
-    MARKER_SIZE = 24   # 红点直径
-    MARKER_COLOR = (255, 0, 0, 255)  # 红色
+    THROTTLE_MS = 100           # 节流间隔
+    DRAG_THRESHOLD = 10         # 拖拽判定距离阈值
+    DOUBLE_CLICK_INTERVAL = 400 # 双击判定时间间隔 (ms)
+    DOUBLE_CLICK_DISTANCE = 5   # 双击判定距离阈值
+    WINDOW_BORDER_COLOR = (0, 120, 255)  # 蓝色边框
+    WINDOW_BORDER_WIDTH = 3     # 边框宽度
+    IMAGE_FORMAT = "webp"       # 图片格式
+    IMAGE_QUALITY = 80          # 压缩质量 (1-100)
 
     def __init__(self, storage_dir: Path):
         self.storage_dir = storage_dir
-        self.last_capture_time = 0
         self._lock = threading.Lock()
         self._sct = mss.mss()
+
+        # 按下状态记录
+        self._press_time: float = 0
+        self._press_x: int = 0
+        self._press_y: int = 0
+        self._press_button: str = ""
+
+        # 上次点击记录（用于双击检测）
+        self._last_click_time: float = 0
+        self._last_click_x: int = 0
+        self._last_click_y: int = 0
+
+        # 节流
+        self._last_capture_time: float = 0
 
     def _get_day_dir(self) -> Path:
         """获取当日目录"""
@@ -257,65 +289,197 @@ class MouseCapture:
         day_dir.mkdir(parents=True, exist_ok=True)
         return day_dir
 
-    def _capture_screen(self, x: int, y: int, button: str):
-        """截图并标记点击位置"""
+    def _get_monitor_offset(self) -> tuple[int, int]:
+        """获取拼接图像的坐标偏移"""
+        monitor = self._sct.monitors[0]
+        return monitor["left"], monitor["top"]
+
+    def _get_active_window_bounds(self) -> Optional[tuple[int, int, int, int]]:
+        """获取当前活跃窗口的边界 (x, y, width, height)"""
         try:
-            # 截取整个屏幕
-            monitor = self._sct.monitors[0]  # 所有显示器
+            # 获取当前活跃应用的 PID
+            workspace = AppKit.NSWorkspace.sharedWorkspace()
+            active_app = workspace.frontmostApplication()
+            pid = active_app.processIdentifier()
+
+            # 获取所有窗口列表
+            window_list = Quartz.CGWindowListCopyWindowInfo(
+                Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
+                Quartz.kCGNullWindowID
+            )
+
+            # 找到属于当前应用的窗口
+            for window in window_list:
+                if window.get(Quartz.kCGWindowOwnerPID) == pid:
+                    # 跳过没有边界的窗口
+                    bounds = window.get(Quartz.kCGWindowBounds)
+                    if not bounds:
+                        continue
+
+                    # 跳过太小的窗口（可能是菜单、tooltip等）
+                    width = int(bounds.get("Width", 0))
+                    height = int(bounds.get("Height", 0))
+                    if width < 100 or height < 100:
+                        continue
+
+                    x = int(bounds.get("X", 0))
+                    y = int(bounds.get("Y", 0))
+                    return (x, y, width, height)
+
+            return None
+        except Exception as e:
+            print(f"[Warning] Failed to get window bounds: {e}")
+            return None
+
+    def _capture_and_save(self, action: str, button: str,
+                          x1: int, y1: int,
+                          x2: Optional[int] = None, y2: Optional[int] = None):
+        """截图并保存"""
+        try:
+            # 获取活跃窗口边界（在截图前获取）
+            window_bounds = self._get_active_window_bounds()
+
+            # 截取所有显示器
+            monitor = self._sct.monitors[0]
             screenshot = self._sct.grab(monitor)
 
             # 转换为 PIL Image
             img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
 
-            # 绘制红点
-            draw = ImageDraw.Draw(img)
-            radius = self.MARKER_SIZE // 2
+            # 获取坐标偏移并转换
+            offset_x, offset_y = self._get_monitor_offset()
+            img_x1 = x1 - offset_x
+            img_y1 = y1 - offset_y
 
-            # 调整坐标（mss 的坐标可能需要偏移）
-            draw.ellipse(
-                [x - radius, y - radius, x + radius, y + radius],
-                fill=self.MARKER_COLOR[:3],
-                outline=(200, 0, 0)
-            )
+            # 绘制活跃窗口蓝色边框
+            if window_bounds:
+                win_x, win_y, win_w, win_h = window_bounds
+                # 转换为图像坐标
+                win_img_x = win_x - offset_x
+                win_img_y = win_y - offset_y
+
+                draw = ImageDraw.Draw(img)
+                draw.rectangle(
+                    [win_img_x, win_img_y, win_img_x + win_w, win_img_y + win_h],
+                    outline=self.WINDOW_BORDER_COLOR,
+                    width=self.WINDOW_BORDER_WIDTH
+                )
+
+            # 如果是拖拽，绘制半透明矩形
+            if action == "drag" and x2 is not None and y2 is not None:
+                img_x2 = x2 - offset_x
+                img_y2 = y2 - offset_y
+
+                # 创建半透明覆盖层
+                overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                draw = ImageDraw.Draw(overlay)
+
+                # 确保坐标顺序正确
+                left = min(img_x1, img_x2)
+                top = min(img_y1, img_y2)
+                right = max(img_x1, img_x2)
+                bottom = max(img_y1, img_y2)
+
+                # 绘制半透明灰色矩形
+                draw.rectangle(
+                    [left, top, right, bottom],
+                    fill=(128, 128, 128, 77),  # 30% 透明度
+                    outline=(80, 80, 80, 200),
+                    width=2
+                )
+
+                # 合并图层
+                img = img.convert("RGBA")
+                img = Image.alpha_composite(img, overlay)
+                img = img.convert("RGB")
 
             # 生成文件名
             now = datetime.now()
             timestamp = now.strftime("%H%M%S")
             ms = now.strftime("%f")[:3]
-            filename = f"click_{timestamp}_{ms}_{button}_x{x}_y{y}.png"
+            ext = self.IMAGE_FORMAT
 
-            # 保存
+            if action == "drag":
+                filename = f"drag_{timestamp}_{ms}_{button}_x{x1}_y{y1}_to_x{x2}_y{y2}.{ext}"
+            elif action == "dblclick":
+                filename = f"dblclick_{timestamp}_{ms}_{button}_x{x1}_y{y1}.{ext}"
+            else:
+                filename = f"click_{timestamp}_{ms}_{button}_x{x1}_y{y1}.{ext}"
+
+            # 保存 (WebP 格式，有损压缩)
             filepath = self._get_day_dir() / filename
-            img.save(filepath, "PNG")
+            img.save(filepath, "WEBP", quality=self.IMAGE_QUALITY)
 
             print(f"[Screenshot] {filename}")
 
         except Exception as e:
             print(f"[Error] Screenshot failed: {e}")
 
-    def on_click(self, x: int, y: int, button, pressed: bool):
-        """鼠标点击事件"""
-        if not pressed:  # 只处理按下事件
-            return
+    def _distance(self, x1: int, y1: int, x2: int, y2: int) -> float:
+        """计算两点距离"""
+        return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
 
-        now = time.time() * 1000  # 转为毫秒
+    def on_click(self, x: float, y: float, button, pressed: bool):
+        """鼠标事件处理"""
+        x, y = int(x), int(y)
+        now = time.time() * 1000  # 毫秒
+        button_name = str(button).split(".")[-1]
 
-        with self._lock:
-            # 节流
-            if now - self.last_capture_time < self.THROTTLE_MS:
-                return
-            self.last_capture_time = now
+        if pressed:
+            # 鼠标按下 - 记录状态
+            with self._lock:
+                self._press_time = now
+                self._press_x = x
+                self._press_y = y
+                self._press_button = button_name
+        else:
+            # 鼠标释放 - 判断行为类型
+            with self._lock:
+                # 节流检查
+                if now - self._last_capture_time < self.THROTTLE_MS:
+                    return
+                self._last_capture_time = now
 
-        # 获取按键类型
-        button_name = str(button).split(".")[-1]  # left, right, middle
+                press_x = self._press_x
+                press_y = self._press_y
+                press_button = self._press_button
 
-        # 异步截图
-        thread = threading.Thread(
-            target=self._capture_screen,
-            args=(x, y, button_name)
-        )
-        thread.daemon = True
-        thread.start()
+            # 计算拖拽距离
+            drag_distance = self._distance(press_x, press_y, x, y)
+
+            if drag_distance > self.DRAG_THRESHOLD:
+                # 拖拽
+                action = "drag"
+                thread = threading.Thread(
+                    target=self._capture_and_save,
+                    args=(action, button_name, press_x, press_y, x, y)
+                )
+            else:
+                # 点击 - 检查是否双击
+                with self._lock:
+                    time_since_last = now - self._last_click_time
+                    dist_from_last = self._distance(
+                        x, y, self._last_click_x, self._last_click_y
+                    )
+
+                    if (time_since_last < self.DOUBLE_CLICK_INTERVAL and
+                        dist_from_last < self.DOUBLE_CLICK_DISTANCE):
+                        action = "dblclick"
+                        # 重置以避免三击变成两次双击
+                        self._last_click_time = 0
+                    else:
+                        action = "click"
+                        self._last_click_time = now
+                        self._last_click_x = x
+                        self._last_click_y = y
+
+                thread = threading.Thread(
+                    target=self._capture_and_save,
+                    args=(action, button_name, x, y)
+                )
+
+            thread.daemon = True
+            thread.start()
 
 
 class AutoCapture:

@@ -44,6 +44,17 @@ htmlcov/
 # Capture data (don't commit user data)
 captures/
 ~/auto-capture/
+auto-capture/
+
+# Config files with user settings
+config/*.yaml
+config/*.yml
+config/*.json
+!config/example.yaml
+
+# Logs
+*.log
+logs/
 
 # Claude Code
 .claude/

@@ -1,0 +1,27 @@
+# OpenCapture + Qwen3-VL 配置文件
+# 复制此文件为 config.yaml 并根据需要修改
+
+# 截图捕获配置
+capture:
+  output_dir: ~/auto-capture          # 存储目录
+  throttle_ms: 100                     # 截图节流间隔 (毫秒)
+  image_format: webp                   # 图片格式
+  image_quality: 80                    # 图片质量 (1-100)
+
+# Qwen3-VL 配置
+qwen:
+  enabled: true                        # 是否启用 AI 分析
+  api_url: http://localhost:11434      # Ollama API 地址
+  model: qwen2-vl:7b                   # 模型名称
+  timeout: 30                          # 请求超时 (秒)
+  max_retries: 3                       # 最大重试次数
+
+# 分析器配置
+analyzer:
+  queue_size: 100                      # 分析队列大小
+  batch_size: 5                        # 批处理大小
+  save_pretty_json: true              # 保存格式化 JSON
+
+# 日志配置
+logging:
+  level: INFO                          # 日志级别: DEBUG, INFO, WARNING, ERROR

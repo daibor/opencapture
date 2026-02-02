@@ -126,6 +126,11 @@ class KeyLogger:
 
     CLUSTER_INTERVAL = 20  # 20秒聚类间隔
 
+    # 当前窗口状态
+    _current_app_name: str = ""
+    _current_window_title: str = ""
+    _current_bundle_id: str = ""
+
     # 特殊键映射 (使用 macOS 键盘符号)
     SPECIAL_KEYS = {
         keyboard.Key.enter: '↩',
@@ -177,6 +182,11 @@ class KeyLogger:
         self.line_start_time: Optional[datetime] = None
         self._lock = threading.Lock()
 
+        # 窗口状态
+        self._current_app_name = ""
+        self._current_window_title = ""
+        self._current_bundle_id = ""
+
     def _get_log_file(self) -> Path:
         """获取当日日志文件路径"""
         today = datetime.now().strftime("%Y-%m-%d")
@@ -197,11 +207,69 @@ class KeyLogger:
             self.current_line = ""
             self.line_start_time = None
 
-    def on_window_change(self, app_name: str, window_title: str, bundle_id: str):
-        """窗口切换时调用"""
-        with self._lock:
+    def _get_active_window_info(self) -> tuple[str, str, str]:
+        """获取当前活跃窗口信息"""
+        try:
+            workspace = AppKit.NSWorkspace.sharedWorkspace()
+            active_app = workspace.frontmostApplication()
+
+            app_name = active_app.localizedName() or ""
+            bundle_id = active_app.bundleIdentifier() or ""
+            pid = active_app.processIdentifier()
+
+            # 获取窗口标题
+            window_title = self._get_window_title(pid)
+
+            return app_name, window_title, bundle_id
+        except Exception:
+            return "", "", ""
+
+    def _get_window_title(self, pid: int) -> str:
+        """通过 Accessibility API 获取窗口标题"""
+        try:
+            app_ref = Quartz.AXUIElementCreateApplication(pid)
+
+            # 尝试获取焦点窗口
+            error, focused_window = Quartz.AXUIElementCopyAttributeValue(
+                app_ref, Quartz.kAXFocusedWindowAttribute, None
+            )
+            if error == 0 and focused_window:
+                error, title = Quartz.AXUIElementCopyAttributeValue(
+                    focused_window, Quartz.kAXTitleAttribute, None
+                )
+                if error == 0 and title:
+                    return str(title)
+
+            # 备选：获取第一个窗口
+            error, windows = Quartz.AXUIElementCopyAttributeValue(
+                app_ref, Quartz.kAXWindowsAttribute, None
+            )
+            if error == 0 and windows and len(windows) > 0:
+                error, title = Quartz.AXUIElementCopyAttributeValue(
+                    windows[0], Quartz.kAXTitleAttribute, None
+                )
+                if error == 0 and title:
+                    return str(title)
+
+            return ""
+        except Exception:
+            return ""
+
+    def _check_window_change(self):
+        """检查窗口是否变化，如变化则写入分隔块"""
+        app_name, window_title, bundle_id = self._get_active_window_info()
+
+        # 检查是否变化
+        if (app_name != self._current_app_name or
+            window_title != self._current_window_title):
+
             # 先刷新当前行
             self._flush_line()
+
+            # 更新状态
+            self._current_app_name = app_name
+            self._current_window_title = window_title
+            self._current_bundle_id = bundle_id
 
             # 写入窗口分隔块
             now = datetime.now()
@@ -233,6 +301,9 @@ class KeyLogger:
             char = f'[{key}]'
 
         with self._lock:
+            # 检查窗口是否变化
+            self._check_window_change()
+
             # 检查是否需要新起一行（超过聚类间隔）
             if self.last_key_time and (now - self.last_key_time) > self.CLUSTER_INTERVAL:
                 self._flush_line()
@@ -495,7 +566,6 @@ class AutoCapture:
 
         self.key_logger = KeyLogger(self.storage_dir)
         self.mouse_capture = MouseCapture(self.storage_dir)
-        self.window_tracker = WindowTracker(self.key_logger.on_window_change)
 
         self._keyboard_listener: Optional[keyboard.Listener] = None
         self._mouse_listener: Optional[mouse.Listener] = None
@@ -507,9 +577,6 @@ class AutoCapture:
         print("[AutoCapture] Press Ctrl+C to stop")
 
         self._running = True
-
-        # 启动窗口追踪
-        self.window_tracker.start()
 
         # 启动键盘监听
         self._keyboard_listener = keyboard.Listener(
@@ -539,8 +606,6 @@ class AutoCapture:
             self._keyboard_listener.stop()
         if self._mouse_listener:
             self._mouse_listener.stop()
-
-        self.window_tracker.stop()
 
         print("[AutoCapture] Stopped.")
 

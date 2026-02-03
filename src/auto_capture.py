@@ -192,7 +192,7 @@ class KeyLogger:
         today = datetime.now().strftime("%Y-%m-%d")
         day_dir = self.storage_dir / today
         day_dir.mkdir(parents=True, exist_ok=True)
-        return day_dir / "keys.log"
+        return day_dir / f"{today}.log"
 
     def _flush_line(self):
         """将当前行写入文件"""
@@ -271,20 +271,34 @@ class KeyLogger:
             self._current_window_title = window_title
             self._current_bundle_id = bundle_id
 
-            # 写入窗口分隔块
+            # 写入窗口分隔块（三个换行分隔）
             now = datetime.now()
             timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-            separator = "=" * 80
             if window_title:
-                header = f"\n{separator}\n[{timestamp}] {app_name} | {window_title}\n"
+                header = f"\n\n\n[{timestamp}] {app_name} | {window_title} ({bundle_id})\n"
             else:
-                header = f"\n{separator}\n[{timestamp}] {app_name}\n"
-            header += f"                      {bundle_id}\n{separator}\n"
+                header = f"\n\n\n[{timestamp}] {app_name} ({bundle_id})\n"
 
             log_file = self._get_log_file()
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(header)
+
+    def log_screenshot(self, filename: str, action: str, x: int, y: int,
+                       x2: Optional[int] = None, y2: Optional[int] = None):
+        """记录截图到日志"""
+        with self._lock:
+            now = datetime.now()
+            timestamp = now.strftime("%H:%M:%S")
+
+            if action == "drag" and x2 is not None:
+                line = f"[{timestamp}] 📷 {action} ({x},{y})->({x2},{y2}) {filename}\n"
+            else:
+                line = f"[{timestamp}] 📷 {action} ({x},{y}) {filename}\n"
+
+            log_file = self._get_log_file()
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(line)
 
     def on_key_press(self, key):
         """按键事件处理"""
@@ -334,8 +348,9 @@ class MouseCapture:
     IMAGE_FORMAT = "webp"       # 图片格式
     IMAGE_QUALITY = 80          # 压缩质量 (1-100)
 
-    def __init__(self, storage_dir: Path):
+    def __init__(self, storage_dir: Path, key_logger: Optional['KeyLogger'] = None):
         self.storage_dir = storage_dir
+        self.key_logger = key_logger
         self._lock = threading.Lock()
         self._sct = mss.mss()
 
@@ -352,6 +367,9 @@ class MouseCapture:
 
         # 节流
         self._last_capture_time: float = 0
+
+        # 活跃线程追踪
+        self._active_threads: list[threading.Thread] = []
 
     def _get_day_dir(self) -> Path:
         """获取当日目录"""
@@ -481,6 +499,10 @@ class MouseCapture:
             filepath = self._get_day_dir() / filename
             img.save(filepath, "WEBP", quality=self.IMAGE_QUALITY)
 
+            # 记录到日志
+            if self.key_logger:
+                self.key_logger.log_screenshot(filename, action, x1, y1, x2, y2)
+
             print(f"[Screenshot] {filename}")
 
         except Exception as e:
@@ -489,6 +511,11 @@ class MouseCapture:
     def _distance(self, x1: int, y1: int, x2: int, y2: int) -> float:
         """计算两点距离"""
         return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+
+    def wait_for_pending(self, timeout: float = 2.0):
+        """等待所有截图线程完成"""
+        for thread in self._active_threads:
+            thread.join(timeout=timeout)
 
     def on_click(self, x: float, y: float, button, pressed: bool):
         """鼠标事件处理"""
@@ -549,8 +576,11 @@ class MouseCapture:
                     args=(action, button_name, x, y)
                 )
 
-            thread.daemon = True
             thread.start()
+            self._active_threads.append(thread)
+
+            # 清理已完成的线程
+            self._active_threads = [t for t in self._active_threads if t.is_alive()]
 
 
 class AutoCapture:
@@ -565,7 +595,7 @@ class AutoCapture:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
         self.key_logger = KeyLogger(self.storage_dir)
-        self.mouse_capture = MouseCapture(self.storage_dir)
+        self.mouse_capture = MouseCapture(self.storage_dir, self.key_logger)
 
         self._keyboard_listener: Optional[keyboard.Listener] = None
         self._mouse_listener: Optional[mouse.Listener] = None
@@ -598,14 +628,17 @@ class AutoCapture:
 
         self._running = False
 
-        # 刷新键盘日志
-        self.key_logger.flush()
-
-        # 停止监听器
+        # 先停止监听器，防止新事件进入
         if self._keyboard_listener:
             self._keyboard_listener.stop()
         if self._mouse_listener:
             self._mouse_listener.stop()
+
+        # 等待截图线程完成
+        self.mouse_capture.wait_for_pending()
+
+        # 刷新键盘日志
+        self.key_logger.flush()
 
         print("[AutoCapture] Stopped.")
 

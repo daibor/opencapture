@@ -28,8 +28,8 @@ check_ollama() {
         echo "要启用图片分析功能，请安装 Ollama:"
         echo "  brew install ollama"
         echo ""
-        echo "然后下载 Qwen2-VL 模型:"
-        echo "  ollama pull qwen2-vl:7b"
+        echo "然后下载 Qwen3-VL 模型:"
+        echo "  ollama pull qwen3-vl:4b"
         echo ""
         read -p "是否继续运行（不带分析功能）？[y/N] " -n 1 -r
         echo
@@ -40,14 +40,14 @@ check_ollama() {
     else
         echo "✅ Ollama 已安装"
 
-        # 检查模型
-        if ollama list | grep -q "qwen2-vl:7b"; then
-            echo "✅ Qwen2-VL 模型已下载"
+        # 检查模型 (qwen3-vl:4b 约 3.3GB，适合 16GB 内存)
+        if ollama list | grep -q "qwen3-vl:4b"; then
+            echo "✅ Qwen3-VL 模型已下载"
         else
-            echo "⚠️  Qwen2-VL 模型未找到"
+            echo "⚠️  Qwen3-VL 模型未找到"
             echo ""
-            echo "正在下载模型（约 4.5GB）..."
-            ollama pull qwen2-vl:7b
+            echo "正在下载模型（约 3.3GB）..."
+            ollama pull qwen3-vl:4b
         fi
 
         # 启动 Ollama 服务
@@ -127,7 +127,7 @@ main() {
     echo "  ⌨️  键盘记录: 已启用"
 
     if [ "$ENABLE_ANALYSIS" = true ]; then
-        echo "  🤖 AI 分析: 已启用 (Qwen2-VL)"
+        echo "  🤖 AI 分析: 已启用 (Qwen3-VL:4b, 适合 16GB 内存)"
     else
         echo "  🤖 AI 分析: 已禁用"
     fi

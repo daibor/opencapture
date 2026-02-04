@@ -21,9 +21,10 @@ class Qwen3VLClient:
     def __init__(
         self,
         api_url: str = "http://localhost:11434",
-        model: str = "qwen2-vl:7b",
-        timeout: int = 30,
-        max_retries: int = 3
+        model: str = "qwen3-vl:4b",  # 适合 16GB 内存
+        timeout: int = 60,
+        max_retries: int = 3,
+        num_ctx: int = 4096  # 上下文窗口大小
     ):
         """
         初始化 Qwen3-VL 客户端
@@ -33,11 +34,13 @@ class Qwen3VLClient:
             model: 模型名称
             timeout: 请求超时时间（秒）
             max_retries: 最大重试次数
+            num_ctx: 上下文窗口大小
         """
         self.api_url = api_url
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
+        self.num_ctx = num_ctx
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def __aenter__(self):
@@ -171,7 +174,8 @@ class Qwen3VLClient:
             "stream": False,
             "options": {
                 "temperature": temperature,
-                "num_predict": max_tokens
+                "num_predict": max_tokens,
+                "num_ctx": self.num_ctx  # 上下文窗口大小
             }
         }
 

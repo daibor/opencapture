@@ -30,15 +30,16 @@ class Config:
             "image_quality": 80,  # 图片质量 (1-100)
         },
 
-        # Qwen3-VL 配置
+        # Qwen3-VL 配置 (qwen3-vl:4b 约 3.3GB，适合 16GB 内存)
         "qwen": {
             "enabled": True,  # 是否启用图片分析
             "api_url": "http://localhost:11434",  # API 地址
-            "model": "qwen2-vl:7b",  # 模型名称
-            "timeout": 30,  # 请求超时（秒）
+            "model": "qwen3-vl:4b",  # 模型名称 (适合 16GB 内存)
+            "timeout": 60,  # 请求超时（秒）
             "max_retries": 3,  # 最大重试次数
-            "temperature": 0.7,  # 温度参数
-            "max_tokens": 2048,  # 最大 token 数
+            "temperature": 0.3,  # 温度参数 (低温度更稳定)
+            "max_tokens": 1024,  # 最大 token 数 (限制以节省内存)
+            "num_ctx": 4096,  # 上下文窗口大小
         },
 
         # 分析器配置

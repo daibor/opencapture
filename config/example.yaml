@@ -25,9 +25,9 @@ llm:
   ollama:
     enabled: true
     api_url: http://localhost:11434
-    model: qwen2-vl:7b                # Vision model for screenshots
-    text_model: qwen2.5:7b            # Text model (optional, defaults to above)
-    timeout: 120                      # Request timeout (seconds)
+    model: qwen3-vl:4b                # Vision model for screenshots
+    text_model: qwen3:8b            # Text model (optional, defaults to above)
+    timeout: 240                      # Request timeout (seconds)
     max_retries: 3                    # Max retry attempts
     num_ctx: 4096                     # Context window size
 

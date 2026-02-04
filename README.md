@@ -145,13 +145,13 @@ This tool records all keyboard input (including passwords) and screen content. P
 ### 一键安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/opencapture/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daibor/opencapture/main/install.sh | bash
 ```
 
 或克隆后手动安装：
 
 ```bash
-git clone https://github.com/yourusername/opencapture.git
+git clone https://github.com/daibor/opencapture.git
 cd opencapture
 ./install.sh
 ```

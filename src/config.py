@@ -1,198 +1,266 @@
 #!/usr/bin/env python3
 """
-配置管理模块
-管理 OpenCapture 和 Qwen3-VL 集成的所有配置
+Configuration Management Module
+Supports multiple LLM providers and flexible configuration options
 """
 
 import os
 import json
+import re
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 
 class Config:
-    """配置管理类"""
+    """Configuration manager"""
 
-    # 默认配置
+    # Default configuration
     DEFAULT_CONFIG = {
-        # OpenCapture 基础配置
+        # Basic settings
         "capture": {
             "output_dir": "~/auto-capture",
-            "cluster_interval": 20,  # 键盘聚类间隔（秒）
-            "throttle_ms": 100,  # 截图节流间隔（毫秒）
-            "drag_threshold": 10,  # 拖拽判定距离（像素）
-            "double_click_interval": 400,  # 双击判定间隔（毫秒）
-            "double_click_distance": 5,  # 双击判定距离（像素）
-            "window_border_color": [0, 120, 255],  # 窗口边框颜色 RGB
-            "window_border_width": 3,  # 边框宽度（像素）
-            "image_format": "webp",  # 图片格式
-            "image_quality": 80,  # 图片质量 (1-100)
+            "image_format": "webp",
+            "image_quality": 80,
+            "throttle_ms": 100,
+            "drag_threshold": 10,
+            "double_click_interval": 400,
+            "double_click_distance": 5,
+            "window_border_color": [0, 120, 255],
+            "window_border_width": 3,
+            "cluster_interval": 20,
         },
 
-        # Qwen3-VL 配置 (qwen3-vl:4b 约 3.3GB，适合 16GB 内存)
-        "qwen": {
-            "enabled": True,  # 是否启用图片分析
-            "api_url": "http://localhost:11434",  # API 地址
-            "model": "qwen3-vl:4b",  # 模型名称 (适合 16GB 内存)
-            "timeout": 60,  # 请求超时（秒）
-            "max_retries": 3,  # 最大重试次数
-            "temperature": 0.3,  # 温度参数 (低温度更稳定)
-            "max_tokens": 1024,  # 最大 token 数 (限制以节省内存)
-            "num_ctx": 4096,  # 上下文窗口大小
+        # LLM configuration
+        "llm": {
+            "default_provider": "ollama",
+
+            "ollama": {
+                "enabled": True,
+                "api_url": "http://localhost:11434",
+                "model": "qwen2-vl:7b",
+                "text_model": None,
+                "timeout": 120,
+                "max_retries": 3,
+                "num_ctx": 4096,
+            },
+
+            "openai": {
+                "enabled": False,
+                "api_key": "${OPENAI_API_KEY}",
+                "api_base": "https://api.openai.com/v1",
+                "model": "gpt-4o",
+                "text_model": "gpt-4o-mini",
+                "timeout": 60,
+                "max_retries": 3,
+                "max_tokens": 4096,
+            },
+
+            "anthropic": {
+                "enabled": False,
+                "api_key": "${ANTHROPIC_API_KEY}",
+                "api_base": "https://api.anthropic.com",
+                "model": "claude-sonnet-4-20250514",
+                "text_model": None,
+                "timeout": 60,
+                "max_retries": 3,
+                "max_tokens": 4096,
+            },
+
+            "custom": {
+                "enabled": False,
+                "api_key": "${CUSTOM_API_KEY}",
+                "api_base": "",
+                "model": "",
+                "text_model": None,
+                "timeout": 60,
+                "max_retries": 3,
+                "max_tokens": 4096,
+            },
         },
 
-        # 分析器配置
-        "analyzer": {
-            "queue_size": 100,  # 分析队列大小
-            "batch_size": 5,  # 批处理大小
-            "save_raw_response": False,  # 是否保存原始响应
-            "save_pretty_json": True,  # 是否保存格式化 JSON
-            "enable_cache": True,  # 是否启用缓存
-            "cache_ttl": 3600,  # 缓存有效期（秒）
+        # Prompt configuration
+        "prompts": {
+            "image": {
+                "system": "You are a professional screen behavior analyst. Analyze user screenshots to understand what the user is doing.",
+                "click": "Analyze this screenshot. The user clicked at coordinates ({x}, {y}). Describe: 1) What element was clicked 2) The purpose of this action 3) Current context.",
+                "dblclick": "Analyze this screenshot. The user double-clicked at coordinates ({x}, {y}). Describe: 1) What was double-clicked 2) Expected result 3) Current workspace.",
+                "drag": "Analyze this screenshot. The user dragged from ({x1}, {y1}) to ({x2}, {y2}). Describe: 1) What was dragged 2) Purpose of the drag 3) Context.",
+                "default": "Analyze this screenshot. Describe the main content, active application, and possible user task.",
+            },
+            "keyboard": {
+                "system": "You are a professional user behavior analyst. Analyze keyboard input to understand the user's work.",
+                "analyze": "Analyze the following keyboard input in {window}:\n\n```\n{content}\n```\n\nDescribe: 1) Current task 2) Input type (code, document, command, chat) 3) Possible goal.",
+            },
+            "daily_summary": "Based on the following daily activity records, generate a brief report:\n\n{activities}\n\nInclude: main work, most used apps, notable activities.",
         },
 
-        # 隐私配置
-        "privacy": {
-            "enabled": False,  # 是否启用隐私保护
-            "blur_sensitive": True,  # 模糊敏感信息
-            "exclude_patterns": [  # 排除的窗口模式
-                ".*password.*",
-                ".*banking.*",
-                ".*private.*"
+        # Scheduler configuration
+        "scheduler": {
+            "enabled": True,
+            "triggers": [
+                {"type": "idle", "idle_minutes": 5},
+                {"type": "schedule", "time": "23:00"},
             ],
-            "sensitive_patterns": [  # 敏感信息正则
-                r"password|pwd|secret",
-                r"\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}",  # 信用卡
-                r"\d{3}-\d{2}-\d{4}",  # SSN
-            ]
+            "batch_size": 10,
+            "delay_between_batches": 2,
+            "skip_analyzed": True,
         },
 
-        # 日志配置
+        # Report configuration
+        "reports": {
+            "output_dir": "reports",
+            "format": "markdown",
+            "include_images": True,
+            "daily_summary": True,
+            "image_analysis": True,
+        },
+
+        # Privacy configuration
+        "privacy": {
+            "enabled": False,
+            "exclude_windows": [
+                ".*[Pp]assword.*",
+                ".*[Bb]anking.*",
+            ],
+            "sensitive_patterns": [
+                r"password|passwd|pwd",
+            ],
+        },
+
+        # Logging configuration
         "logging": {
             "level": "INFO",
-            "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            "file": "opencapture.log",
-            "max_bytes": 10485760,  # 10MB
-            "backup_count": 5,
+            "format": "%(asctime)s - %(levelname)s - %(message)s",
+            "file": None,
         },
+    }
 
-        # 提示词模板
-        "prompts": {
-            "click": "分析用户点击的界面元素、功能按钮或链接，推测点击意图",
-            "dblclick": "分析用户双击的目标，通常是打开文件、应用或激活某个功能",
-            "drag": "分析拖拽操作的起点和终点，可能是选择文本、移动元素或调整大小",
-            "default": "分析截图内容，识别界面类型、主要元素和可能的用户操作",
-        }
+    # Environment variable mapping
+    ENV_MAPPING = {
+        "OPENCAPTURE_OUTPUT_DIR": "capture.output_dir",
+        "OPENCAPTURE_LLM_PROVIDER": "llm.default_provider",
+        "OLLAMA_API_URL": "llm.ollama.api_url",
+        "OLLAMA_MODEL": "llm.ollama.model",
+        "OPENAI_API_KEY": "llm.openai.api_key",
+        "OPENAI_API_BASE": "llm.openai.api_base",
+        "OPENAI_MODEL": "llm.openai.model",
+        "ANTHROPIC_API_KEY": "llm.anthropic.api_key",
+        "ANTHROPIC_MODEL": "llm.anthropic.model",
+        "LOG_LEVEL": "logging.level",
     }
 
     def __init__(self, config_path: Optional[str] = None):
         """
-        初始化配置
+        Initialize configuration
 
         Args:
-            config_path: 配置文件路径
+            config_path: Path to configuration file
         """
         self.config_path = config_path
-        self.config = self.DEFAULT_CONFIG.copy()
+        self.config = self._deep_copy(self.DEFAULT_CONFIG)
 
-        # 加载配置文件
+        # Try auto-loading config file
         if config_path:
             self.load_from_file(config_path)
+        else:
+            self._auto_load_config()
 
-        # 加载环境变量
+        # Load environment variables
         self.load_from_env()
 
-        # 展开路径
-        self._expand_paths()
+        # Expand paths and variables
+        self._expand_all()
+
+    def _deep_copy(self, obj: Any) -> Any:
+        """Deep copy an object"""
+        if isinstance(obj, dict):
+            return {k: self._deep_copy(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._deep_copy(item) for item in obj]
+        return obj
+
+    def _auto_load_config(self):
+        """Auto-discover and load configuration file"""
+        search_paths = [
+            Path.cwd() / "config" / "config.yaml",
+            Path.cwd() / "config" / "config.yml",
+            Path.cwd() / "config.yaml",
+            Path.home() / ".opencapture" / "config.yaml",
+            Path.home() / ".config" / "opencapture" / "config.yaml",
+        ]
+
+        for path in search_paths:
+            if path.exists():
+                self.load_from_file(str(path))
+                break
 
     def load_from_file(self, config_path: str):
-        """
-        从文件加载配置
-
-        Args:
-            config_path: 配置文件路径
-        """
+        """Load configuration from file"""
         config_path = Path(config_path)
         if not config_path.exists():
-            print(f"配置文件不存在: {config_path}")
             return
 
         try:
             with open(config_path, "r", encoding="utf-8") as f:
-                if config_path.suffix == ".json":
+                if config_path.suffix in [".yaml", ".yml"]:
+                    user_config = yaml.safe_load(f) or {}
+                elif config_path.suffix == ".json":
                     user_config = json.load(f)
-                elif config_path.suffix in [".yaml", ".yml"]:
-                    user_config = yaml.safe_load(f)
                 else:
-                    print(f"不支持的配置文件格式: {config_path.suffix}")
                     return
 
-            # 深度合并配置
             self.config = self._deep_merge(self.config, user_config)
-            print(f"已加载配置文件: {config_path}")
+            self.config_path = str(config_path)
+            print(f"Loaded config: {config_path}")
 
         except Exception as e:
-            print(f"加载配置文件失败: {e}")
+            print(f"Failed to load config: {e}")
 
     def load_from_env(self):
-        """从环境变量加载配置"""
-        # Qwen API 配置
-        if "QWEN_API_URL" in os.environ:
-            self.config["qwen"]["api_url"] = os.environ["QWEN_API_URL"]
+        """Load configuration from environment variables"""
+        for env_name, config_path in self.ENV_MAPPING.items():
+            value = os.environ.get(env_name)
+            if value:
+                self.set(config_path, value)
 
-        if "QWEN_MODEL" in os.environ:
-            self.config["qwen"]["model"] = os.environ["QWEN_MODEL"]
-
-        # 启用/禁用分析
-        if "ENABLE_ANALYSIS" in os.environ:
-            self.config["qwen"]["enabled"] = os.environ["ENABLE_ANALYSIS"].lower() == "true"
-
-        # 输出目录
-        if "CAPTURE_OUTPUT_DIR" in os.environ:
-            self.config["capture"]["output_dir"] = os.environ["CAPTURE_OUTPUT_DIR"]
-
-        # 日志级别
-        if "LOG_LEVEL" in os.environ:
-            self.config["logging"]["level"] = os.environ["LOG_LEVEL"]
+        # Auto-enable providers if API key is set
+        if os.environ.get("OPENAI_API_KEY"):
+            self.set("llm.openai.enabled", True)
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            self.set("llm.anthropic.enabled", True)
 
     def _deep_merge(self, base: Dict, override: Dict) -> Dict:
-        """
-        深度合并两个字典
-
-        Args:
-            base: 基础配置
-            override: 覆盖配置
-
-        Returns:
-            Dict: 合并后的配置
-        """
-        result = base.copy()
+        """Deep merge two dictionaries"""
+        result = self._deep_copy(base)
 
         for key, value in override.items():
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 result[key] = self._deep_merge(result[key], value)
             else:
-                result[key] = value
+                result[key] = self._deep_copy(value)
 
         return result
 
-    def _expand_paths(self):
-        """展开配置中的路径"""
-        # 展开输出目录
-        output_dir = self.config["capture"]["output_dir"]
-        self.config["capture"]["output_dir"] = str(Path(output_dir).expanduser())
+    def _expand_all(self):
+        """Expand all paths and environment variables"""
+        output_dir = self.get("capture.output_dir", "~/auto-capture")
+        self.set("capture.output_dir", str(Path(output_dir).expanduser()))
+
+    def _resolve_env_var(self, value: Any) -> Any:
+        """Resolve environment variable reference"""
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            env_name = value[2:-1]
+            return os.environ.get(env_name, value)
+        return value
 
     def get(self, key: str, default: Any = None) -> Any:
         """
-        获取配置值
+        Get configuration value
 
         Args:
-            key: 配置键，支持点号分隔的嵌套键
-            default: 默认值
-
-        Returns:
-            Any: 配置值
+            key: Configuration key (dot-separated)
+            default: Default value
         """
         keys = key.split(".")
         value = self.config
@@ -203,15 +271,15 @@ class Config:
             else:
                 return default
 
-        return value
+        return self._resolve_env_var(value)
 
     def set(self, key: str, value: Any):
         """
-        设置配置值
+        Set configuration value
 
         Args:
-            key: 配置键，支持点号分隔的嵌套键
-            value: 配置值
+            key: Configuration key (dot-separated)
+            value: Value to set
         """
         keys = key.split(".")
         config = self.config
@@ -223,109 +291,113 @@ class Config:
 
         config[keys[-1]] = value
 
-    def save(self, path: Optional[str] = None):
+    def get_llm_config(self) -> Dict[str, Any]:
+        """Get LLM configuration"""
+        return self._deep_copy(self.config.get("llm", {}))
+
+    def get_prompts(self) -> Dict[str, Any]:
+        """Get prompt configuration"""
+        return self._deep_copy(self.config.get("prompts", {}))
+
+    def get_capture_config(self) -> Dict[str, Any]:
+        """Get capture configuration"""
+        return self._deep_copy(self.config.get("capture", {}))
+
+    def get_reports_config(self) -> Dict[str, Any]:
+        """Get reports configuration"""
+        return self._deep_copy(self.config.get("reports", {}))
+
+    def get_default_provider(self) -> str:
+        """Get default LLM provider"""
+        return self.get("llm.default_provider", "ollama")
+
+    def is_provider_enabled(self, provider: str) -> bool:
+        """Check if provider is enabled"""
+        return self.get(f"llm.{provider}.enabled", False)
+
+    def get_enabled_providers(self) -> List[str]:
+        """Get list of enabled providers"""
+        providers = ["ollama", "openai", "anthropic", "custom"]
+        return [p for p in providers if self.is_provider_enabled(p)]
+
+    def get_image_prompt(self, action: str, **kwargs) -> str:
         """
-        保存配置到文件
+        Get image analysis prompt
 
         Args:
-            path: 保存路径，None 则使用初始化时的路径
+            action: Action type (click, dblclick, drag, default)
+            **kwargs: Format parameters (x, y, x1, y1, x2, y2)
         """
-        save_path = path or self.config_path
+        prompts = self.get("prompts.image", {})
+        prompt_template = prompts.get(action) or prompts.get("default", "")
+        return prompt_template.format(**kwargs) if kwargs else prompt_template
+
+    def get_keyboard_prompt(self, **kwargs) -> str:
+        """
+        Get keyboard log analysis prompt
+
+        Args:
+            **kwargs: Format parameters (window, content)
+        """
+        prompts = self.get("prompts.keyboard", {})
+        prompt_template = prompts.get("analyze", "")
+        return prompt_template.format(**kwargs) if kwargs else prompt_template
+
+    def get_system_prompt(self, prompt_type: str = "image") -> str:
+        """Get system prompt"""
+        return self.get(f"prompts.{prompt_type}.system", "")
+
+    def should_exclude_window(self, window_title: str) -> bool:
+        """Check if window should be excluded (privacy)"""
+        if not self.get("privacy.enabled", False):
+            return False
+
+        patterns = self.get("privacy.exclude_windows", [])
+        for pattern in patterns:
+            if re.search(pattern, window_title, re.IGNORECASE):
+                return True
+        return False
+
+    def get_output_dir(self) -> Path:
+        """Get output directory"""
+        return Path(self.get("capture.output_dir", "~/auto-capture")).expanduser()
+
+    def get_reports_dir(self) -> Path:
+        """Get reports directory"""
+        output_dir = self.get_output_dir()
+        reports_subdir = self.get("reports.output_dir", "reports")
+        return output_dir / reports_subdir
+
+    def to_dict(self) -> Dict:
+        """Get complete configuration dictionary"""
+        return self._deep_copy(self.config)
+
+    def save(self, path: Optional[str] = None):
+        """Save configuration to file"""
+        save_path = Path(path or self.config_path)
         if not save_path:
-            print("未指定保存路径")
+            print("No save path specified")
             return
 
-        save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             with open(save_path, "w", encoding="utf-8") as f:
-                if save_path.suffix == ".json":
-                    json.dump(self.config, f, indent=2, ensure_ascii=False)
-                elif save_path.suffix in [".yaml", ".yml"]:
-                    yaml.dump(self.config, f, allow_unicode=True)
+                if save_path.suffix in [".yaml", ".yml"]:
+                    yaml.dump(self.config, f, allow_unicode=True, default_flow_style=False)
                 else:
-                    print(f"不支持的配置文件格式: {save_path.suffix}")
-                    return
-
-            print(f"配置已保存: {save_path}")
-
+                    json.dump(self.config, f, indent=2, ensure_ascii=False)
+            print(f"Config saved: {save_path}")
         except Exception as e:
-            print(f"保存配置失败: {e}")
-
-    def to_dict(self) -> Dict:
-        """
-        获取完整配置字典
-
-        Returns:
-            Dict: 配置字典
-        """
-        return self.config.copy()
-
-    def get_qwen_config(self) -> Dict:
-        """
-        获取 Qwen 客户端配置
-
-        Returns:
-            Dict: Qwen 配置
-        """
-        return {
-            "api_url": self.get("qwen.api_url"),
-            "model": self.get("qwen.model"),
-            "timeout": self.get("qwen.timeout"),
-            "max_retries": self.get("qwen.max_retries"),
-        }
-
-    def get_analyzer_config(self) -> Dict:
-        """
-        获取分析器配置
-
-        Returns:
-            Dict: 分析器配置
-        """
-        return {
-            "queue_size": self.get("analyzer.queue_size"),
-            "batch_size": self.get("analyzer.batch_size"),
-        }
-
-    def is_analysis_enabled(self) -> bool:
-        """
-        检查是否启用图片分析
-
-        Returns:
-            bool: 是否启用
-        """
-        return self.get("qwen.enabled", False)
-
-    def should_exclude_window(self, window_title: str) -> bool:
-        """
-        检查窗口是否应该被排除（隐私保护）
-
-        Args:
-            window_title: 窗口标题
-
-        Returns:
-            bool: 是否排除
-        """
-        if not self.get("privacy.enabled", False):
-            return False
-
-        import re
-        patterns = self.get("privacy.exclude_patterns", [])
-
-        for pattern in patterns:
-            if re.search(pattern, window_title, re.IGNORECASE):
-                return True
-
-        return False
+            print(f"Failed to save config: {e}")
 
 
-# 全局配置实例
+# Global configuration instance
 _global_config: Optional[Config] = None
 
 
 def get_config() -> Config:
-    """获取全局配置实例"""
+    """Get global configuration instance"""
     global _global_config
     if _global_config is None:
         _global_config = Config()
@@ -333,43 +405,25 @@ def get_config() -> Config:
 
 
 def init_config(config_path: Optional[str] = None) -> Config:
-    """
-    初始化全局配置
-
-    Args:
-        config_path: 配置文件路径
-
-    Returns:
-        Config: 配置实例
-    """
+    """Initialize global configuration"""
     global _global_config
     _global_config = Config(config_path)
     return _global_config
 
 
-# 生成示例配置文件
-def generate_example_config(output_path: str = "config/example.yaml"):
-    """
-    生成示例配置文件
-
-    Args:
-        output_path: 输出路径
-    """
-    config = Config()
-    config.save(output_path)
-    print(f"示例配置文件已生成: {output_path}")
+def reset_config():
+    """Reset global configuration"""
+    global _global_config
+    _global_config = None
 
 
 if __name__ == "__main__":
-    # 生成示例配置
-    generate_example_config()
-
-    # 测试配置
     config = Config()
-    print("默认配置:")
+    print("Default configuration:")
     print(json.dumps(config.to_dict(), indent=2, ensure_ascii=False))
 
-    # 测试获取配置
-    print(f"\nQwen API URL: {config.get('qwen.api_url')}")
-    print(f"是否启用分析: {config.is_analysis_enabled()}")
-    print(f"输出目录: {config.get('capture.output_dir')}")
+    print(f"\nDefault provider: {config.get_default_provider()}")
+    print(f"Enabled providers: {config.get_enabled_providers()}")
+    print(f"Output directory: {config.get_output_dir()}")
+
+    print(f"\nClick prompt: {config.get_image_prompt('click', x=100, y=200)}")

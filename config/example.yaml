@@ -1,27 +1,211 @@
-# OpenCapture + Qwen3-VL 配置文件
-# 复制此文件为 config.yaml 并根据需要修改
+# OpenCapture Configuration
+# Copy this file to config.yaml and customize as needed
 
-# 截图捕获配置
+# ============================================================
+# Basic Settings
+# ============================================================
 capture:
-  output_dir: ~/auto-capture          # 存储目录
-  throttle_ms: 100                     # 截图节流间隔 (毫秒)
-  image_format: webp                   # 图片格式
-  image_quality: 80                    # 图片质量 (1-100)
+  output_dir: ~/auto-capture          # Data storage directory
+  image_format: webp                  # Image format: webp, png, jpg
+  image_quality: 80                   # Compression quality (1-100)
+  throttle_ms: 100                    # Screenshot throttle interval (ms)
+  drag_threshold: 10                  # Drag detection threshold (pixels)
+  double_click_interval: 400          # Double-click detection interval (ms)
 
-# Qwen3-VL 配置
-qwen:
-  enabled: true                        # 是否启用 AI 分析
-  api_url: http://localhost:11434      # Ollama API 地址
-  model: qwen2-vl:7b                   # 模型名称
-  timeout: 30                          # 请求超时 (秒)
-  max_retries: 3                       # 最大重试次数
+# ============================================================
+# LLM Configuration
+# ============================================================
+llm:
+  # Default provider: ollama | openai | anthropic | custom
+  default_provider: ollama
 
-# 分析器配置
-analyzer:
-  queue_size: 100                      # 分析队列大小
-  batch_size: 5                        # 批处理大小
-  save_pretty_json: true              # 保存格式化 JSON
+  # ----------------------------------------------------------
+  # Local Ollama (Recommended for privacy)
+  # ----------------------------------------------------------
+  ollama:
+    enabled: true
+    api_url: http://localhost:11434
+    model: qwen2-vl:7b                # Vision model for screenshots
+    text_model: qwen2.5:7b            # Text model (optional, defaults to above)
+    timeout: 120                      # Request timeout (seconds)
+    max_retries: 3                    # Max retry attempts
+    num_ctx: 4096                     # Context window size
 
-# 日志配置
+  # ----------------------------------------------------------
+  # OpenAI API
+  # ----------------------------------------------------------
+  openai:
+    enabled: false
+    api_key: ${OPENAI_API_KEY}        # Supports environment variables
+    api_base: https://api.openai.com/v1
+    model: gpt-4o                     # Vision model
+    text_model: gpt-4o-mini           # Text model
+    timeout: 60
+    max_retries: 3
+    max_tokens: 4096
+
+  # ----------------------------------------------------------
+  # Anthropic Claude API
+  # ----------------------------------------------------------
+  anthropic:
+    enabled: false
+    api_key: ${ANTHROPIC_API_KEY}     # Supports environment variables
+    api_base: https://api.anthropic.com
+    model: claude-sonnet-4-20250514   # Vision model
+    text_model: claude-sonnet-4-20250514
+    timeout: 60
+    max_retries: 3
+    max_tokens: 4096
+
+  # ----------------------------------------------------------
+  # Custom API (OpenAI-compatible)
+  # ----------------------------------------------------------
+  custom:
+    enabled: false
+    api_key: ${CUSTOM_API_KEY}
+    api_base: https://your-api.com/v1
+    model: your-model-name
+    text_model: your-text-model
+    timeout: 60
+    max_retries: 3
+    max_tokens: 4096
+
+# ============================================================
+# Prompt Configuration
+# ============================================================
+prompts:
+  # ----------------------------------------------------------
+  # Image Analysis Prompts
+  # ----------------------------------------------------------
+  image:
+    # System prompt (shared by all image analyses)
+    system: |
+      You are a professional screen behavior analyst. Analyze user screenshots to understand what the user is doing.
+      Provide concise descriptions focusing on user intent and current task.
+
+    # Click analysis
+    click: |
+      Analyze this screenshot. The user clicked at coordinates ({x}, {y}).
+      Briefly describe:
+      1. What element was clicked (button, link, menu, etc.)
+      2. The purpose of this action
+      3. Current work context
+
+    # Double-click analysis
+    dblclick: |
+      Analyze this screenshot. The user double-clicked at coordinates ({x}, {y}).
+      Briefly describe:
+      1. What was double-clicked (file, app icon, text, etc.)
+      2. Expected result after double-click
+      3. Current work scenario
+
+    # Drag analysis
+    drag: |
+      Analyze this screenshot. The user dragged from ({x1}, {y1}) to ({x2}, {y2}).
+      The gray semi-transparent area marks the drag region.
+      Briefly describe:
+      1. What is being dragged
+      2. Purpose of the drag (text selection, file move, window resize, etc.)
+      3. Operation context
+
+    # Default analysis (when action type is unknown)
+    default: |
+      Analyze this screenshot.
+      Describe:
+      1. Main content displayed on screen
+      2. Currently active application
+      3. Possible user task
+
+  # ----------------------------------------------------------
+  # Keyboard Log Analysis Prompts
+  # ----------------------------------------------------------
+  keyboard:
+    # System prompt
+    system: |
+      You are a professional user behavior analyst. Analyze keyboard input to understand user's work.
+      Provide concise descriptions while protecting user privacy - do not repeat sensitive information.
+
+    # Input analysis
+    analyze: |
+      Analyze the following keyboard input in {window}:
+
+      ```
+      {content}
+      ```
+
+      Briefly describe:
+      1. Current task
+      2. Input type (code, document, command, chat, etc.)
+      3. Possible work goal
+
+  # ----------------------------------------------------------
+  # Daily Summary Prompt
+  # ----------------------------------------------------------
+  daily_summary: |
+    Based on the following daily activity records, generate a brief report:
+
+    ## Activity Records
+    {activities}
+
+    Generate a 100-200 word report including:
+    1. Main work today
+    2. Most used applications
+    3. Notable activities
+
+# ============================================================
+# Scheduler Configuration
+# ============================================================
+scheduler:
+  enabled: true
+
+  # Analysis triggers
+  triggers:
+    # Auto-analyze when idle
+    - type: idle
+      idle_minutes: 5                 # Start after 5 minutes idle
+
+    # Scheduled analysis
+    - type: schedule
+      time: "23:00"                   # Daily at 23:00
+
+  # Batch processing settings
+  batch_size: 10                      # Images per batch
+  delay_between_batches: 2            # Delay between batches (seconds)
+  skip_analyzed: true                 # Skip already analyzed images
+
+# ============================================================
+# Report Configuration
+# ============================================================
+reports:
+  output_dir: reports                 # Report directory (relative to capture.output_dir)
+  format: markdown                    # Output format: markdown | json | both
+  include_images: true                # Include image references in reports
+  daily_summary: true                 # Generate daily summary
+  image_analysis: true                # Generate image analysis details
+
+# ============================================================
+# Privacy Configuration
+# ============================================================
+privacy:
+  enabled: false                      # Enable privacy protection
+
+  # Excluded windows (regex patterns)
+  exclude_windows:
+    - ".*[Pp]assword.*"
+    - ".*[Bb]anking.*"
+    - ".*1Password.*"
+    - ".*Keychain.*"
+
+  # Sensitive information filters (regex patterns)
+  sensitive_patterns:
+    - "password|passwd|pwd"
+    - "\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}"  # Credit card
+    - "\\d{3}-\\d{2}-\\d{4}"                            # SSN
+
+# ============================================================
+# Logging Configuration
+# ============================================================
 logging:
-  level: INFO                          # 日志级别: DEBUG, INFO, WARNING, ERROR
+  level: INFO                         # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+  file: null                          # Log file path, null for console only

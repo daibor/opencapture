@@ -156,8 +156,19 @@ class OllamaClient(BaseLLMClient):
                         logger.info(f"Ollama service OK, model {self.model} loaded")
                         return True
                     else:
-                        logger.warning(f"Model {self.model} not found, available: {models}")
+                        logger.warning(
+                            f"Model '{self.model}' not found. "
+                            f"Run: ollama pull {self.model}"
+                        )
+                        if models:
+                            logger.info(f"Available models: {', '.join(models)}")
                         return False
+        except aiohttp.ClientConnectorError:
+            logger.error(
+                f"Cannot connect to Ollama at {self.api_url}. "
+                f"Please ensure Ollama is installed and running: ollama serve"
+            )
+            return False
         except Exception as e:
             logger.error(f"Ollama health check failed: {e}")
             return False
@@ -233,6 +244,7 @@ class OllamaClient(BaseLLMClient):
         """Send request to Ollama API"""
         import time
         start_time = time.time()
+        last_error = ""
 
         for attempt in range(self.max_retries):
             try:
@@ -254,13 +266,29 @@ class OllamaClient(BaseLLMClient):
                             provider=self.provider_name,
                             inference_time=inference_time,
                         )
+                    elif response.status == 404:
+                        last_error = (
+                            f"Model '{payload.get('model', self.model)}' not found. "
+                            f"Run: ollama pull {payload.get('model', self.model)}"
+                        )
+                        logger.error(last_error)
+                        break  # No point retrying
                     else:
                         error_text = await response.text()
-                        logger.error(f"Ollama API error {response.status}: {error_text}")
+                        last_error = f"Ollama API error {response.status}: {error_text}"
+                        logger.error(last_error)
 
+            except aiohttp.ClientConnectorError:
+                last_error = (
+                    f"Cannot connect to Ollama at {self.api_url}. "
+                    f"Please ensure Ollama is running: ollama serve"
+                )
+                logger.error(last_error)
             except asyncio.TimeoutError:
+                last_error = f"Request timeout ({self.timeout}s)"
                 logger.warning(f"Ollama request timeout (attempt {attempt + 1}/{self.max_retries})")
             except Exception as e:
+                last_error = str(e)
                 logger.error(f"Ollama request failed: {e}")
 
             if attempt < self.max_retries - 1:
@@ -268,7 +296,7 @@ class OllamaClient(BaseLLMClient):
 
         return AnalysisResult(
             success=False,
-            error="Max retries exceeded",
+            error=last_error or "Max retries exceeded",
             provider=self.provider_name,
             inference_time=time.time() - start_time
         )
@@ -619,11 +647,17 @@ class AnthropicClient(BaseLLMClient):
 class LLMRouter:
     """LLM Router - Manages multiple LLM clients and routes requests"""
 
-    def __init__(self, config: Dict[str, Any]):
+    REMOTE_PROVIDERS = {"openai", "anthropic", "custom"}
+
+    def __init__(self, config: Dict[str, Any], allow_online: bool = False,
+                 asr_config: Optional[Dict[str, Any]] = None):
         self.config = config
         self.clients: Dict[str, BaseLLMClient] = {}
+        self.allow_online = allow_online
         self.default_provider = config.get("default_provider", "ollama")
+        self.asr_client: Optional[ASRClient] = None
         self._init_clients()
+        self._init_asr(asr_config)
 
     def _init_clients(self):
         """Initialize all enabled clients"""
@@ -640,6 +674,10 @@ class LLMRouter:
                 max_retries=ollama_cfg.get("max_retries", 3),
                 num_ctx=ollama_cfg.get("num_ctx", 4096),
             )
+
+        # Remote providers — only initialize if online mode is allowed
+        if not self.allow_online:
+            return
 
         # OpenAI
         openai_cfg = llm_config.get("openai", {})
@@ -683,6 +721,18 @@ class LLMRouter:
                 max_tokens=custom_cfg.get("max_tokens", 4096),
             )
             self.clients["custom"].provider_name = "custom"
+
+    def _init_asr(self, asr_config: Optional[Dict[str, Any]]):
+        """Initialize ASR client if configured."""
+        if not asr_config or not asr_config.get("enabled", False):
+            return
+        self.asr_client = ASRClient(
+            api_url=asr_config.get("api_url", "https://api.openai.com/v1"),
+            api_key=asr_config.get("api_key", ""),
+            model=asr_config.get("model", "whisper-1"),
+            language=asr_config.get("language"),
+            timeout=asr_config.get("timeout", 120),
+        )
 
     def get_client(self, provider: Optional[str] = None) -> Optional[BaseLLMClient]:
         """Get specified or default client"""
@@ -733,6 +783,146 @@ class LLMRouter:
                 error=f"Provider {provider or self.default_provider} not available"
             )
         return await client.analyze_text(text, prompt, system_prompt, **kwargs)
+
+    async def transcribe_audio(self, audio_path: str) -> AnalysisResult:
+        """Transcribe audio using the configured ASR client."""
+        if not self.asr_client:
+            return AnalysisResult(
+                success=False,
+                error="ASR not configured. Enable it in config: asr.enabled: true"
+            )
+        return await self.asr_client.transcribe(audio_path)
+
+
+class ASRClient:
+    """OpenAI-compatible ASR client for audio transcription.
+
+    Works with OpenAI Whisper API, faster-whisper-server, or any service
+    that implements POST /v1/audio/transcriptions with multipart form data.
+    """
+
+    def __init__(
+        self,
+        api_url: str = "https://api.openai.com/v1",
+        api_key: str = "",
+        model: str = "whisper-1",
+        language: Optional[str] = None,
+        timeout: int = 120,
+    ):
+        self.api_url = api_url.rstrip("/")
+        self.api_key = self._resolve_env_var(api_key)
+        self.model = model
+        self.language = language
+        self.timeout = timeout
+        self.session: Optional[aiohttp.ClientSession] = None
+
+    def _resolve_env_var(self, value: str) -> str:
+        if value and value.startswith("${") and value.endswith("}"):
+            env_name = value[2:-1]
+            return os.environ.get(env_name, "")
+        return value
+
+    async def _ensure_session(self):
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+
+    async def transcribe(self, audio_path: str) -> AnalysisResult:
+        """Transcribe an audio file to text.
+
+        Posts the audio file as multipart form data to the
+        OpenAI-compatible /v1/audio/transcriptions endpoint.
+        """
+        import time
+        start_time = time.time()
+
+        audio_path = Path(audio_path)
+        if not audio_path.exists():
+            return AnalysisResult(
+                success=False,
+                error=f"Audio file not found: {audio_path}",
+                provider="asr",
+            )
+
+        await self._ensure_session()
+
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        data = aiohttp.FormData()
+        data.add_field(
+            "file",
+            open(audio_path, "rb"),
+            filename=audio_path.name,
+            content_type="audio/wav",
+        )
+        data.add_field("model", self.model)
+        if self.language:
+            data.add_field("language", self.language)
+        data.add_field("response_format", "text")
+
+        try:
+            async with self.session.post(
+                f"{self.api_url}/audio/transcriptions",
+                headers=headers,
+                data=data,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            ) as response:
+                elapsed = time.time() - start_time
+
+                if response.status == 200:
+                    content_type = response.headers.get("Content-Type", "")
+                    if "json" in content_type:
+                        result = await response.json()
+                        text = result.get("text", "")
+                    else:
+                        text = (await response.text()).strip()
+
+                    return AnalysisResult(
+                        success=True,
+                        content=text,
+                        model=self.model,
+                        provider="asr",
+                        inference_time=elapsed,
+                    )
+                else:
+                    error_text = await response.text()
+                    return AnalysisResult(
+                        success=False,
+                        error=f"ASR API error {response.status}: {error_text[:200]}",
+                        provider="asr",
+                        inference_time=elapsed,
+                    )
+        except asyncio.TimeoutError:
+            return AnalysisResult(
+                success=False,
+                error=f"ASR request timed out after {self.timeout}s",
+                provider="asr",
+                inference_time=time.time() - start_time,
+            )
+        except Exception as e:
+            return AnalysisResult(
+                success=False,
+                error=f"ASR request failed: {e}",
+                provider="asr",
+                inference_time=time.time() - start_time,
+            )
+
+    async def health_check(self) -> bool:
+        """Check if the ASR service is reachable."""
+        try:
+            await self._ensure_session()
+            headers = {}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            async with self.session.get(
+                f"{self.api_url}/models",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                return response.status == 200
+        except Exception:
+            return False
 
 
 def create_client(provider: str, **kwargs) -> BaseLLMClient:

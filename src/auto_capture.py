@@ -300,6 +300,21 @@ class KeyLogger:
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(line)
 
+    def log_mic_event(self, event_type: str, detail: str):
+        """记录麦克风事件到日志"""
+        with self._lock:
+            now = datetime.now()
+            timestamp = now.strftime("%H:%M:%S")
+
+            if event_type == "mic_stop":
+                line = f"[{timestamp}] 🎤 {event_type} {detail}\n"
+            else:
+                line = f"[{timestamp}] 🎤 {event_type} | {detail}\n"
+
+            log_file = self._get_log_file()
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(line)
+
     def on_key_press(self, key):
         """按键事件处理"""
         now = time.time()
@@ -586,7 +601,8 @@ class MouseCapture:
 class AutoCapture:
     """主控制器"""
 
-    def __init__(self, storage_dir: Optional[str] = None):
+    def __init__(self, storage_dir: Optional[str] = None, mic_enabled: bool = False,
+                 mic_config: Optional[dict] = None):
         if storage_dir:
             self.storage_dir = Path(storage_dir).expanduser()
         else:
@@ -596,6 +612,24 @@ class AutoCapture:
 
         self.key_logger = KeyLogger(self.storage_dir)
         self.mouse_capture = MouseCapture(self.storage_dir, self.key_logger)
+        self.mic_capture = None
+
+        if mic_enabled:
+            try:
+                from src.mic_capture import MicrophoneCapture
+                cfg = mic_config or {}
+                self.mic_capture = MicrophoneCapture(
+                    storage_dir=self.storage_dir,
+                    key_logger=self.key_logger,
+                    sample_rate=cfg.get("mic_sample_rate", 16000),
+                    channels=cfg.get("mic_channels", 1),
+                    start_debounce_ms=cfg.get("mic_start_debounce_ms", 500),
+                    stop_debounce_ms=cfg.get("mic_stop_debounce_ms", 2000),
+                )
+            except ImportError as e:
+                print(f"[AutoCapture] Mic capture unavailable (missing dependency): {e}")
+            except Exception as e:
+                print(f"[AutoCapture] Mic capture init failed: {e}")
 
         self._keyboard_listener: Optional[keyboard.Listener] = None
         self._mouse_listener: Optional[mouse.Listener] = None
@@ -620,6 +654,10 @@ class AutoCapture:
         )
         self._mouse_listener.start()
 
+        # 启动麦克风监听
+        if self.mic_capture:
+            self.mic_capture.start()
+
         print("[AutoCapture] Running...")
 
     def stop(self):
@@ -633,6 +671,10 @@ class AutoCapture:
             self._keyboard_listener.stop()
         if self._mouse_listener:
             self._mouse_listener.stop()
+
+        # 停止麦克风录制（在刷新日志之前）
+        if self.mic_capture:
+            self.mic_capture.stop()
 
         # 等待截图线程完成
         self.mouse_capture.wait_for_pending()

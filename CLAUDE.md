@@ -15,7 +15,6 @@ pip install -r requirements.txt
 
 # Run capture mode
 python run.py                          # Start recording
-python run.py --no-ai                  # Record without AI analysis
 
 # Run analysis mode
 python run.py --analyze today          # Analyze today's data

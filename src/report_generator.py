@@ -435,6 +435,65 @@ class ReportGenerator:
                 unanalyzed.append(img_file)
         return sorted(unanalyzed)
 
+    def generate_audio_txt(
+        self,
+        audio_path: Path,
+        transcription: str,
+        metadata: Optional[Dict] = None,
+    ) -> str:
+        """
+        Generate txt transcription file for a single audio recording.
+
+        Follows the same pattern as generate_image_txt:
+        mic_*.wav → mic_*.txt (same base name)
+
+        Args:
+            audio_path: Audio file path
+            transcription: Transcription text
+            metadata: Optional metadata (timestamp, app, duration)
+
+        Returns:
+            str: txt file path
+        """
+        txt_path = audio_path.with_suffix(".txt")
+
+        lines = []
+
+        if metadata:
+            if metadata.get("timestamp"):
+                lines.append(f"Time: {metadata['timestamp']}")
+            if metadata.get("app"):
+                lines.append(f"App: {metadata['app']}")
+            if metadata.get("duration"):
+                lines.append(f"Duration: {metadata['duration']}")
+            if lines:
+                lines.extend(["", "---", ""])
+
+        lines.append(transcription)
+
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+        logger.debug(f"Generated: {txt_path.name}")
+        return str(txt_path)
+
+    def get_unanalyzed_audios(self, date_dir: Path) -> List[Path]:
+        """
+        Get list of audio files without transcription.
+
+        Args:
+            date_dir: Date directory
+
+        Returns:
+            List[Path]: Audio files without corresponding .txt
+        """
+        unanalyzed = []
+        for wav_file in date_dir.glob("mic_*.wav"):
+            txt_file = wav_file.with_suffix(".txt")
+            if not txt_file.exists():
+                unanalyzed.append(wav_file)
+        return sorted(unanalyzed)
+
 
 class ReportAggregator:
     """Report aggregator - generates reports from analysis results"""

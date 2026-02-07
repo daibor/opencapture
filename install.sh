@@ -4,7 +4,7 @@
 # 支持 macOS 和 Linux
 #
 # 使用方法:
-#   curl -fsSL https://raw.githubusercontent.com/yourusername/opencapture/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/daibor/opencapture/main/install.sh | bash
 #   或
 #   ./install.sh
 #
@@ -20,7 +20,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # 配置
-REPO_URL="https://github.com/yourusername/opencapture"
+REPO_URL="https://github.com/daibor/opencapture.git"
 INSTALL_DIR="$HOME/.opencapture"
 BIN_DIR="$HOME/.local/bin"
 PYTHON_MIN_VERSION="3.9"
@@ -153,17 +153,25 @@ install_system_deps() {
 clone_project() {
     info "获取 OpenCapture..."
 
+    # 检测是否在项目目录下运行（本地安装模式）
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+
     if [[ -d "$INSTALL_DIR" ]]; then
         info "更新现有安装..."
         cd "$INSTALL_DIR"
         git pull origin main 2>/dev/null || true
+    elif [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/run.py" && -d "$SCRIPT_DIR/src" ]]; then
+        # 本地安装模式：从项目目录复制
+        info "从本地目录安装..."
+        mkdir -p "$INSTALL_DIR"
+        cp -r "$SCRIPT_DIR"/* "$INSTALL_DIR/" 2>/dev/null || true
+        cp -r "$SCRIPT_DIR"/.git "$INSTALL_DIR/" 2>/dev/null || true
     else
-        git clone "$REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
-            # 如果 clone 失败（可能是本地安装），创建目录
-            mkdir -p "$INSTALL_DIR"
-            if [[ -d "$(dirname "$0")/src" ]]; then
-                cp -r "$(dirname "$0")"/* "$INSTALL_DIR/"
-            fi
+        # 远程安装模式：从 GitHub clone
+        git clone "$REPO_URL" "$INSTALL_DIR" || {
+            error "无法克隆仓库: $REPO_URL"
+            error "请检查网络连接或手动 clone 后运行 ./install.sh"
+            exit 1
         }
     fi
     success "代码准备完成"
@@ -183,7 +191,12 @@ setup_python_env() {
     pip install --upgrade pip -q
 
     if [[ -f "requirements.txt" ]]; then
-        pip install -r requirements.txt -q
+        if [[ "$OS" == "linux" ]]; then
+            # Linux: 跳过 macOS 专属的 pyobjc 包
+            grep -v "^pyobjc" requirements.txt | pip install -r /dev/stdin -q
+        else
+            pip install -r requirements.txt -q
+        fi
     fi
 
     success "Python 环境配置完成"
@@ -233,15 +246,47 @@ fi
 cd "$INSTALL_DIR"
 source venv/bin/activate
 
+# 确保 Ollama 可用（仅当使用 ollama provider 时）
+ensure_ollama() {
+    # 如果指定了非 ollama 的 provider，跳过
+    for arg in "$@"; do
+        if [[ "$arg" == "--provider" ]]; then
+            return
+        fi
+    done
+
+    # 检查是否安装
+    if ! command -v ollama &> /dev/null; then
+        echo ""
+        echo "[!] Ollama 未安装（本地 AI 分析需要 Ollama）"
+        echo ""
+        echo "安装方法:"
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            echo "  brew install ollama"
+        else
+            echo "  curl -fsSL https://ollama.ai/install.sh | sh"
+        fi
+        echo ""
+        echo "或使用远程 API 代替:"
+        echo "  export OPENAI_API_KEY=sk-xxx"
+        echo "  opencapture --provider openai --analyze today"
+        echo ""
+        return 1
+    fi
+
+    # 检查是否运行
+    if ! pgrep -x "ollama" > /dev/null 2>&1; then
+        echo "启动 Ollama 服务..."
+        ollama serve &> /dev/null &
+        sleep 2
+    fi
+}
+
 # 解析参数
 case "${1:-}" in
-    --no-ai|--simple)
-        shift
-        python run.py --no-ai "$@"
-        ;;
-    --analyze)
-        shift
-        python run.py --analyze "${1:-today}" "${@:2}"
+    --analyze|--image|--audio)
+        ensure_ollama "$@"
+        python run.py "$@"
         ;;
     --help|-h)
         cat << 'HELP'
@@ -250,13 +295,13 @@ OpenCapture - 键鼠行为记录与 AI 分析
 用法: opencapture [选项]
 
 采集模式:
-  opencapture                   启动采集（带 AI 分析）
-  opencapture --no-ai           启动采集（不带 AI）
+  opencapture                   启动采集
 
 分析模式:
   opencapture --analyze today   分析今天的数据
   opencapture --analyze DATE    分析指定日期 (YYYY-MM-DD)
   opencapture --image FILE      分析单张图片
+  opencapture --audio FILE      转录单个音频文件
 
 LLM 选项:
   --provider ollama|openai|anthropic|custom
@@ -288,14 +333,7 @@ LLM 选项:
 HELP
         ;;
     *)
-        # 启动 Ollama（如果需要且未运行）
-        if [[ "${1:-}" != "--provider" ]] || [[ "${2:-}" == "ollama" ]]; then
-            if ! pgrep -x "ollama" > /dev/null 2>&1; then
-                echo "启动 Ollama 服务..."
-                ollama serve &> /dev/null &
-                sleep 2
-            fi
-        fi
+        ensure_ollama "$@"
         python run.py "$@"
         ;;
 esac
@@ -361,7 +399,7 @@ macos_permissions() {
     echo "设置: 系统设置 → 隐私与安全性 → 对应项目"
     echo ""
 
-    read -p "打开系统设置？[y/N] " -n 1 -r
+    read -p "打开系统设置？[y/N] " -n 1 -r < /dev/tty
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
@@ -377,7 +415,7 @@ ask_download_model() {
     echo "也可以使用远程 API (OpenAI/Claude) 无需下载"
     echo ""
 
-    read -p "下载本地模型？[Y/n] " -n 1 -r
+    read -p "下载本地模型？[Y/n] " -n 1 -r < /dev/tty
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         download_model
@@ -422,7 +460,7 @@ main() {
     echo "  • Qwen2-VL 模型 (可选)"
     echo ""
 
-    read -p "继续？[Y/n] " -n 1 -r
+    read -p "继续？[Y/n] " -n 1 -r < /dev/tty
     echo
     [[ $REPLY =~ ^[Nn]$ ]] && exit 0
 

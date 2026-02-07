@@ -12,6 +12,13 @@ capture:
   drag_threshold: 10                  # Drag detection threshold (pixels)
   double_click_interval: 400          # Double-click detection interval (ms)
 
+  # Microphone capture (records only when mic is in use by other apps)
+  mic_enabled: false                  # Enable microphone recording
+  mic_sample_rate: 16000              # Sample rate in Hz (16kHz for speech)
+  mic_channels: 1                     # Mono recording
+  mic_start_debounce_ms: 500          # Wait before starting recording (ms)
+  mic_stop_debounce_ms: 2000          # Wait before stopping recording (ms)
+
 # ============================================================
 # LLM Configuration
 # ============================================================
@@ -153,25 +160,24 @@ prompts:
     3. Notable activities
 
 # ============================================================
-# Scheduler Configuration
+# ASR Configuration (Audio Transcription)
+# ============================================================
+# Uses OpenAI-compatible /v1/audio/transcriptions endpoint.
+# Works with: OpenAI Whisper API, faster-whisper-server, etc.
+asr:
+  enabled: false
+  api_url: https://api.openai.com/v1    # Or local: http://localhost:8000/v1
+  api_key: ${OPENAI_API_KEY}            # Leave empty for local servers
+  model: whisper-1                       # OpenAI: whisper-1, Local: whisper-large-v3
+  language: null                         # null = auto-detect, or: zh, en, ja, etc.
+  timeout: 120                           # Timeout in seconds
+
+# ============================================================
+# Batch Analysis Settings
 # ============================================================
 scheduler:
-  enabled: true
-
-  # Analysis triggers
-  triggers:
-    # Auto-analyze when idle
-    - type: idle
-      idle_minutes: 5                 # Start after 5 minutes idle
-
-    # Scheduled analysis
-    - type: schedule
-      time: "23:00"                   # Daily at 23:00
-
-  # Batch processing settings
   batch_size: 10                      # Images per batch
   delay_between_batches: 2            # Delay between batches (seconds)
-  skip_analyzed: true                 # Skip already analyzed images
 
 # ============================================================
 # Report Configuration
@@ -187,6 +193,10 @@ reports:
 # Privacy Configuration
 # ============================================================
 privacy:
+  allow_online: false                 # Allow remote LLM providers (OpenAI/Anthropic)
+                                      # Must be set to true before using cloud-based analysis
+                                      # WARNING: Screenshots and keyboard logs will be sent to remote servers
+                                      # Or set env var: OPENCAPTURE_ALLOW_ONLINE=true
   enabled: false                      # Enable privacy protection
 
   # Excluded windows (regex patterns)

@@ -29,6 +29,11 @@ class Config:
             "window_border_color": [0, 120, 255],
             "window_border_width": 3,
             "cluster_interval": 20,
+            "mic_enabled": False,
+            "mic_sample_rate": 16000,
+            "mic_channels": 1,
+            "mic_start_debounce_ms": 500,
+            "mic_stop_debounce_ms": 2000,
         },
 
         # LLM configuration
@@ -95,16 +100,20 @@ class Config:
             "daily_summary": "Based on the following daily activity records, generate a brief report:\n\n{activities}\n\nInclude: main work, most used apps, notable activities.",
         },
 
-        # Scheduler configuration
+        # ASR (Automatic Speech Recognition) configuration
+        "asr": {
+            "enabled": False,
+            "api_url": "https://api.openai.com/v1",
+            "api_key": "${OPENAI_API_KEY}",
+            "model": "whisper-1",
+            "language": None,  # None = auto-detect
+            "timeout": 120,
+        },
+
+        # Batch analysis settings
         "scheduler": {
-            "enabled": True,
-            "triggers": [
-                {"type": "idle", "idle_minutes": 5},
-                {"type": "schedule", "time": "23:00"},
-            ],
             "batch_size": 10,
             "delay_between_batches": 2,
-            "skip_analyzed": True,
         },
 
         # Report configuration
@@ -119,6 +128,7 @@ class Config:
         # Privacy configuration
         "privacy": {
             "enabled": False,
+            "allow_online": False,  # Must be explicitly enabled to use remote LLM providers
             "exclude_windows": [
                 ".*[Pp]assword.*",
                 ".*[Bb]anking.*",
@@ -147,8 +157,11 @@ class Config:
         "OPENAI_MODEL": "llm.openai.model",
         "ANTHROPIC_API_KEY": "llm.anthropic.api_key",
         "ANTHROPIC_MODEL": "llm.anthropic.model",
+        "OPENCAPTURE_ALLOW_ONLINE": "privacy.allow_online",
         "LOG_LEVEL": "logging.level",
     }
+
+    REMOTE_PROVIDERS = {"openai", "anthropic", "custom"}
 
     def __init__(self, config_path: Optional[str] = None):
         """
@@ -319,6 +332,18 @@ class Config:
         """Get list of enabled providers"""
         providers = ["ollama", "openai", "anthropic", "custom"]
         return [p for p in providers if self.is_provider_enabled(p)]
+
+    def is_remote_provider(self, provider: str) -> bool:
+        """Check if provider sends data to remote servers"""
+        return provider in self.REMOTE_PROVIDERS
+
+    def is_online_allowed(self) -> bool:
+        """Check if remote/online LLM providers are allowed"""
+        value = self.get("privacy.allow_online", False)
+        # Handle string values from env vars
+        if isinstance(value, str):
+            return value.lower() in ("true", "1", "yes")
+        return bool(value)
 
     def get_image_prompt(self, action: str, **kwargs) -> str:
         """

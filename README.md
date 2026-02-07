@@ -19,13 +19,13 @@ Automatic screenshot + AI understanding tool. Records keyboard input, mouse acti
 ### Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yourusername/opencapture/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/daibor/opencapture/main/install.sh | bash
 ```
 
 Or clone and install manually:
 
 ```bash
-git clone https://github.com/yourusername/opencapture.git
+git clone https://github.com/daibor/opencapture.git
 cd opencapture
 ./install.sh
 ```
@@ -33,11 +33,8 @@ cd opencapture
 ### Usage
 
 ```bash
-# Start capture (with AI analysis)
+# Start capture
 opencapture
-
-# Start capture (without AI, lightweight)
-opencapture --no-ai
 
 # Analyze existing screenshots
 opencapture --analyze today
@@ -159,11 +156,8 @@ cd opencapture
 ### 使用方法
 
 ```bash
-# 启动采集（带 AI 分析）
+# 启动采集
 opencapture
-
-# 启动采集（不带 AI，更轻量）
-opencapture --no-ai
 
 # 分析已有截图
 opencapture --analyze today

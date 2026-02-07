@@ -13,8 +13,18 @@ from pathlib import Path
 def run_capture(args):
     """Run capture mode"""
     from src.auto_capture import AutoCapture
+    from src.config import init_config
 
-    capture = AutoCapture(storage_dir=args.dir)
+    config = init_config(args.config if hasattr(args, 'config') else None)
+    if args.dir:
+        config.set("capture.output_dir", str(Path(args.dir).expanduser()))
+
+    capture_config = config.get_capture_config()
+    capture = AutoCapture(
+        storage_dir=args.dir or config.get("capture.output_dir"),
+        mic_enabled=capture_config.get("mic_enabled", False),
+        mic_config=capture_config,
+    )
     capture.run()
 
 
@@ -33,9 +43,15 @@ async def run_analyze(args):
     if args.health_check:
         print("Checking LLM services...")
         status = await analyzer.health_check()
+        all_ok = True
         for provider, ok in status.items():
             icon = "OK" if ok else "FAIL"
             print(f"  [{icon}] {provider}")
+            if not ok:
+                all_ok = False
+        if not all_ok:
+            print()
+            await analyzer.preflight_check(args.provider)
         return
 
     # List dates
@@ -47,10 +63,28 @@ async def run_analyze(args):
 
     # Analyze single image
     if args.image:
+        if not await analyzer.preflight_check(args.provider):
+            return
+        if not analyzer.confirm_online_usage(args.provider):
+            return
         print(f"Analyzing image: {args.image}")
         result = await analyzer.analyze_image(
             args.image,
             provider=args.provider,
+            save_txt=True
+        )
+        if result.success:
+            print(f"\n{result.content}")
+            print(f"\n[Time: {result.inference_time:.2f}s]")
+        else:
+            print(f"Error: {result.error}")
+        return
+
+    # Transcribe single audio
+    if args.audio:
+        print(f"Transcribing audio: {args.audio}")
+        result = await analyzer.analyze_audio(
+            args.audio,
             save_txt=True
         )
         if result.success:
@@ -69,9 +103,15 @@ async def run_analyze(args):
     elif date_str == "yesterday":
         date_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
+    provider = args.provider or config.get_default_provider()
+
     print(f"Analyzing date: {date_str}")
-    print(f"Provider: {args.provider or config.get_default_provider()}")
+    print(f"Provider: {provider}")
     print()
+
+    # Confirm before sending data to remote providers
+    if not analyzer.confirm_online_usage(args.provider):
+        return
 
     results = await analyzer.analyze_day(
         date_str,
@@ -94,6 +134,7 @@ async def run_analyze(args):
     print("Analysis Complete")
     print("=" * 50)
     print(f"Images analyzed: {results.get('images_analyzed', 0)}")
+    print(f"Audios transcribed: {results.get('audios_transcribed', 0)}")
     print(f"Logs parsed: {results.get('logs_analyzed', 0)}")
 
     if results.get("reports_generated"):
@@ -109,10 +150,10 @@ def main():
         epilog="""
 Examples:
   %(prog)s                      # Start capture
-  %(prog)s --no-ai              # Start capture (no AI)
   %(prog)s --analyze today      # Analyze today's data
   %(prog)s --analyze 2026-02-01 # Analyze specific date
   %(prog)s --image pic.webp     # Analyze single image
+  %(prog)s --audio mic.wav      # Transcribe single audio
   %(prog)s --provider openai    # Use OpenAI for analysis
 """
     )
@@ -127,13 +168,6 @@ Examples:
         help="Configuration file path"
     )
 
-    # Capture mode options
-    parser.add_argument(
-        "--no-ai",
-        action="store_true",
-        help="Disable AI analysis (capture only)"
-    )
-
     # Analysis mode options
     parser.add_argument(
         "--analyze",
@@ -145,6 +179,10 @@ Examples:
     parser.add_argument(
         "--image",
         help="Analyze single image"
+    )
+    parser.add_argument(
+        "--audio",
+        help="Transcribe single audio file"
     )
     parser.add_argument(
         "--provider",
@@ -172,7 +210,7 @@ Examples:
     args = parser.parse_args()
 
     # Determine run mode
-    if args.analyze or args.image or args.health_check or args.list_dates:
+    if args.analyze or args.image or args.audio or args.health_check or args.list_dates:
         # Analysis mode
         if args.analyze:
             args.date = args.analyze

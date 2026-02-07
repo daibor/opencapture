@@ -34,7 +34,11 @@ class Analyzer:
             config: Configuration instance, uses global config if None
         """
         self.config = config or get_config()
-        self.llm_router = LLMRouter(self.config.get_llm_config())
+        self.llm_router = LLMRouter(
+            self.config.get_llm_config(),
+            allow_online=self.config.is_online_allowed(),
+            asr_config=self.config.get("asr"),
+        )
         self.report_generator = ReportGenerator(
             output_dir=self.config.get_output_dir(),
             reports_subdir=self.config.get("reports.output_dir", "reports"),
@@ -48,6 +52,120 @@ class Analyzer:
     async def health_check(self) -> Dict[str, bool]:
         """Check health status of all LLM providers"""
         return await self.llm_router.health_check_all()
+
+    async def preflight_check(self, provider: Optional[str] = None) -> bool:
+        """
+        Pre-flight check before analysis. Returns True if ready.
+        Prints actionable guidance on failure.
+        """
+        provider = provider or self.config.get_default_provider()
+
+        # Block remote providers when online mode is disabled
+        if self.config.is_remote_provider(provider) and not self.config.is_online_allowed():
+            print(
+                f"\n\033[1;31m[Error] Remote provider '{provider}' is blocked"
+                f" — online mode is disabled.\033[0m\n"
+                f"\n"
+                f"Your data includes screenshots and keyboard logs.\n"
+                f"Sending to remote servers requires explicit opt-in.\n"
+                f"\n"
+                f"To enable:\n"
+                f"  1. Set in config:  privacy.allow_online: true\n"
+                f"  2. Or env var:     export OPENCAPTURE_ALLOW_ONLINE=true\n"
+                f"\n"
+                f"To use local analysis instead:\n"
+                f"  ollama pull qwen2-vl:7b\n"
+                f"  opencapture --analyze today\n"
+            )
+            return False
+
+        client = self.llm_router.get_client(provider)
+
+        if not client:
+            enabled = self.llm_router.list_providers()
+            print(f"\n[Error] Provider '{provider}' is not configured.")
+            if enabled:
+                print(f"Available providers: {', '.join(enabled)}")
+                print(f"Use: --provider {enabled[0]}")
+            else:
+                print("No LLM providers are enabled.")
+                print("\nTo use Ollama (local):")
+                print("  1. Install: https://ollama.ai")
+                print("  2. Start:   ollama serve")
+                print("  3. Pull:    ollama pull qwen2-vl:7b")
+                print("\nOr use a remote API:")
+                print("  export OPENAI_API_KEY=sk-xxx")
+                print("  opencapture --provider openai --analyze today")
+            return False
+
+        ok = await client.health_check()
+        if not ok:
+            print(f"\n[Error] Provider '{provider}' is not ready.")
+            if provider == "ollama":
+                print("\nTroubleshooting:")
+                print("  1. Is Ollama installed?")
+                print("     brew install ollama  (macOS)")
+                print("     curl -fsSL https://ollama.ai/install.sh | sh  (Linux)")
+                print(f"  2. Is Ollama running?")
+                print(f"     ollama serve")
+                print(f"  3. Is the model downloaded?")
+                print(f"     ollama pull {client.model}")
+                print(f"     ollama list  (check available models)")
+            elif provider in ("openai", "anthropic"):
+                env_var = "OPENAI_API_KEY" if provider == "openai" else "ANTHROPIC_API_KEY"
+                print(f"\n  Ensure {env_var} is set correctly:")
+                print(f"  export {env_var}=your-api-key")
+            return False
+
+        return True
+
+    def confirm_online_usage(self, provider: Optional[str] = None) -> bool:
+        """
+        Show colored privacy warning and require user confirmation
+        before using a remote LLM provider. Returns True if confirmed.
+        """
+        provider = provider or self.config.get_default_provider()
+        if not self.config.is_remote_provider(provider):
+            return True
+
+        provider_names = {
+            "openai": "OpenAI API",
+            "anthropic": "Anthropic Claude API",
+            "custom": "Custom Remote API",
+        }
+        display_name = provider_names.get(provider, provider)
+
+        YELLOW = "\033[1;33m"
+        RED = "\033[1;31m"
+        BOLD = "\033[1m"
+        NC = "\033[0m"
+
+        print(
+            f"\n{YELLOW}"
+            f"╔══════════════════════════════════════════════════════════╗\n"
+            f"║  ⚠  Privacy Warning — Remote LLM Provider              ║\n"
+            f"╚══════════════════════════════════════════════════════════╝"
+            f"{NC}\n"
+        )
+        print(f"  You are about to send data to: {BOLD}{display_name}{NC}")
+        print(f"  Data includes:")
+        print(f"    {RED}• Screenshots (screen content, visible passwords, personal info){NC}")
+        print(f"    {RED}• Keyboard input logs{NC}")
+        print()
+
+        try:
+            answer = input(f"  Type {BOLD}'yes'{NC} to confirm: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Aborted.")
+            return False
+
+        if answer != "yes":
+            print("  Aborted. Use local Ollama instead:")
+            print("    opencapture --analyze today")
+            return False
+
+        print()
+        return True
 
     def _parse_image_info(self, image_path: Path) -> Dict[str, Any]:
         """Parse action info from image path"""
@@ -229,6 +347,105 @@ class Analyzer:
         logger.info(f"Complete! Success: {success_count}/{len(images)}")
         return success_count
 
+    async def analyze_audio(
+        self,
+        audio_path: str,
+        save_txt: bool = True,
+    ) -> AnalysisResult:
+        """
+        Transcribe a single audio file
+
+        Args:
+            audio_path: Audio file path
+            save_txt: Save result as txt file
+
+        Returns:
+            AnalysisResult: Transcription result
+        """
+        audio_path = Path(audio_path)
+        if not audio_path.exists():
+            return AnalysisResult(
+                success=False,
+                error=f"Audio file not found: {audio_path}"
+            )
+
+        result = await self.llm_router.transcribe_audio(str(audio_path))
+
+        if save_txt and result.success:
+            # Parse metadata from filename: mic_HHmmss_ms_app_durN.wav
+            filename = audio_path.stem
+            metadata = {"timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+            # Extract app name
+            parts = filename.split("_")
+            if len(parts) >= 4:
+                # mic_HHmmss_ms_app[_durN]
+                app_parts = parts[3:]
+                dur_idx = None
+                for i, p in enumerate(app_parts):
+                    if p.startswith("dur"):
+                        dur_idx = i
+                        break
+                if dur_idx is not None:
+                    metadata["app"] = "_".join(app_parts[:dur_idx])
+                    metadata["duration"] = app_parts[dur_idx].replace("dur", "") + "s"
+                else:
+                    metadata["app"] = "_".join(app_parts)
+
+            self.report_generator.generate_audio_txt(
+                audio_path, result.content, metadata
+            )
+
+        return result
+
+    async def analyze_audios_batch(
+        self,
+        date_dir: Path,
+        limit: Optional[int] = None,
+        skip_existing: bool = True,
+    ) -> int:
+        """
+        Batch transcribe audio files in directory
+
+        Args:
+            date_dir: Date directory
+            limit: Limit number of files
+            skip_existing: Skip files with existing txt
+
+        Returns:
+            int: Number of successfully transcribed files
+        """
+        if not self.llm_router.asr_client:
+            return 0
+
+        audios = self.report_generator.get_unanalyzed_audios(date_dir)
+        if not skip_existing:
+            audios = sorted(date_dir.glob("mic_*.wav"))
+
+        if limit:
+            audios = audios[:limit]
+
+        if not audios:
+            logger.info("No audio files to transcribe")
+            return 0
+
+        logger.info(f"Transcribing {len(audios)} audio files...")
+
+        success_count = 0
+        for i, audio_path in enumerate(audios):
+            logger.info(f"[{i+1}/{len(audios)}] {audio_path.name}")
+
+            result = await self.analyze_audio(str(audio_path), save_txt=True)
+
+            if result.success:
+                success_count += 1
+                logger.info(f"  Done: {result.inference_time:.2f}s")
+            else:
+                logger.warning(f"  Failed: {result.error}")
+
+        logger.info(f"Transcription complete! Success: {success_count}/{len(audios)}")
+        return success_count
+
     async def analyze_day(
         self,
         date_str: Optional[str] = None,
@@ -257,9 +474,15 @@ class Analyzer:
             logger.error(f"Directory not found: {date_dir}")
             return {"error": f"Directory not found: {date_dir}"}
 
+        # Pre-flight check
+        if analyze_images or analyze_logs:
+            if not await self.preflight_check(provider):
+                return {"error": "LLM provider not ready. See above for details."}
+
         results = {
             "date": date_str,
             "images_analyzed": 0,
+            "audios_transcribed": 0,
             "logs_analyzed": 0,
             "reports_generated": [],
         }
@@ -270,6 +493,13 @@ class Analyzer:
                 date_dir,
                 skip_existing=True,
                 provider=provider
+            )
+
+        # Transcribe audio files
+        if self.llm_router.asr_client:
+            results["audios_transcribed"] = await self.analyze_audios_batch(
+                date_dir,
+                skip_existing=True,
             )
 
         # Analyze logs (if enabled)

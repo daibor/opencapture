@@ -43,8 +43,8 @@ htmlcov/
 
 # Capture data (don't commit user data)
 captures/
-~/auto-capture/
-auto-capture/
+~/opencapture/
+opencapture/
 
 # Config files with user settings
 config/*.yaml

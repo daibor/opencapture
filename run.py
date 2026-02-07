@@ -161,7 +161,7 @@ Examples:
     # Basic options
     parser.add_argument(
         "-d", "--dir",
-        help="Storage directory (default: ~/auto-capture)"
+        help="Storage directory (default: ~/opencapture)"
     )
     parser.add_argument(
         "-c", "--config",

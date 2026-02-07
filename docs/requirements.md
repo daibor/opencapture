@@ -158,7 +158,7 @@ drag_103050_789_left_x100_y200_to_x500_y400.webp
 - 键盘日志追加写入，不覆盖
 
 #### 3.3 默认存储位置
-- 可配置，默认建议：`~/auto-capture/`
+- 可配置，默认建议：`~/opencapture/`
 
 ---
 
@@ -222,7 +222,7 @@ drag_103050_789_left_x100_y200_to_x500_y400.webp
 
 | 配置项 | 说明 | 默认值 |
 |-------|------|--------|
-| `storageDir` | 数据存储根目录 | `~/auto-capture/` |
+| `storageDir` | 数据存储根目录 | `~/opencapture/` |
 | `keyClusterInterval` | 键盘聚类时间间隔（秒） | `20` |
 | `screenshotThrottle` | 截图节流间隔（毫秒） | `100` |
 | `dragThreshold` | 拖拽判定距离阈值（像素） | `10` |
@@ -239,18 +239,18 @@ drag_103050_789_left_x100_y200_to_x500_y400.webp
 #### 8.1 作为 CLI 工具
 ```bash
 # 启动监听
-auto-capture start
+opencapture start
 
 # 停止监听
-auto-capture stop
+opencapture stop
 
 # 查看状态
-auto-capture status
+opencapture status
 ```
 
 #### 8.2 作为 Node.js 模块
 ```javascript
-const autoCapture = require('auto-capture');
+const autoCapture = require('opencapture');
 
 autoCapture.start({
   storageDir: '~/my-captures/',

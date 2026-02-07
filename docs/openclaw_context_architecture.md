@@ -320,7 +320,7 @@ output:
 
   # 是否同时保留本地副本
   keep_local_copy: true
-  local_dir: ~/auto-capture
+  local_dir: ~/opencapture
 ```
 
 ### 5.3 与 OpenClaw Memory 格式对齐
@@ -443,7 +443,7 @@ output:
   openclaw_workspace: ~/.openclaw/workspace
   context_dir: context
   keep_local_copy: true
-  local_dir: ~/auto-capture
+  local_dir: ~/opencapture
 ```
 
 ---

@@ -78,10 +78,10 @@ Restart terminal after authorization.
 
 ### Data Storage
 
-Default location: `~/auto-capture/`
+Default location: `~/opencapture/`
 
 ```
-~/auto-capture/
+~/opencapture/
 ├── 2026-02-01/
 │   ├── 2026-02-01.log                              # Unified log
 │   ├── click_103045_123_left_x800_y600.webp
@@ -96,10 +96,10 @@ Default location: `~/auto-capture/`
 
 ### Configuration
 
-Copy example config and customize:
+The install script automatically creates `~/.opencapture/config.yaml`. Edit it to customize:
 
 ```bash
-cp config/example.yaml config/config.yaml
+vim ~/.opencapture/config.yaml
 ```
 
 Key settings:
@@ -201,10 +201,10 @@ python run.py -d ~/my-captures
 
 ### 数据存储
 
-默认存储位置：`~/auto-capture/`
+默认存储位置：`~/opencapture/`
 
 ```
-~/auto-capture/
+~/opencapture/
 ├── 2026-02-01/
 │   ├── 2026-02-01.log                              # 统一日志
 │   ├── click_103045_123_left_x800_y600.webp
@@ -249,10 +249,10 @@ python run.py -d ~/my-captures
 
 ### 配置
 
-复制示例配置并修改：
+安装脚本会自动创建 `~/.opencapture/config.yaml`，直接编辑即可：
 
 ```bash
-cp config/example.yaml config/config.yaml
+vim ~/.opencapture/config.yaml
 ```
 
 主要配置项：

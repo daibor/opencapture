@@ -5,7 +5,7 @@
 # Basic Settings
 # ============================================================
 capture:
-  output_dir: ~/auto-capture          # Data storage directory
+  output_dir: ~/opencapture            # Data storage directory
   image_format: webp                  # Image format: webp, png, jpg
   image_quality: 80                   # Compression quality (1-100)
   throttle_ms: 100                    # Screenshot throttle interval (ms)

@@ -316,13 +316,13 @@ LLM 选项:
   -h, --help                    显示帮助
 
 配置文件:
-  ~/.opencapture/config/config.yaml
+  ~/.opencapture/config.yaml
   或设置环境变量:
     OPENAI_API_KEY              使用 OpenAI
     ANTHROPIC_API_KEY           使用 Claude
 
-数据目录: ~/auto-capture/
-报告目录: ~/auto-capture/reports/
+数据目录: ~/opencapture/
+报告目录: ~/opencapture/reports/
 
 示例:
   opencapture                           # 开始记录
@@ -369,16 +369,15 @@ configure_path() {
     warn "请运行: source $SHELL_RC"
 }
 
-# 创建示例配置
+# 创建配置文件
 create_config() {
-    info "创建配置目录..."
+    info "创建配置文件..."
 
-    CONFIG_DIR="$INSTALL_DIR/config"
-    mkdir -p "$CONFIG_DIR"
+    CONFIG_FILE="$INSTALL_DIR/config.yaml"
 
-    if [[ ! -f "$CONFIG_DIR/config.yaml" ]] && [[ -f "$CONFIG_DIR/example.yaml" ]]; then
-        cp "$CONFIG_DIR/example.yaml" "$CONFIG_DIR/config.yaml"
-        success "已创建配置文件: $CONFIG_DIR/config.yaml"
+    if [[ ! -f "$CONFIG_FILE" ]] && [[ -f "$INSTALL_DIR/config/example.yaml" ]]; then
+        cp "$INSTALL_DIR/config/example.yaml" "$CONFIG_FILE"
+        success "已创建配置文件: $CONFIG_FILE"
     fi
 }
 
@@ -444,8 +443,8 @@ print_success() {
     echo "  ${CYAN}export OPENAI_API_KEY=sk-xxx${NC}"
     echo "  ${CYAN}opencapture --provider openai --analyze today${NC}"
     echo ""
-    echo "数据目录: ${BLUE}~/auto-capture${NC}"
-    echo "报告目录: ${BLUE}~/auto-capture/reports${NC}"
+    echo "数据目录: ${BLUE}~/opencapture${NC}"
+    echo "报告目录: ${BLUE}~/opencapture/reports${NC}"
     echo ""
 }
 

@@ -606,7 +606,7 @@ class AutoCapture:
         if storage_dir:
             self.storage_dir = Path(storage_dir).expanduser()
         else:
-            self.storage_dir = Path.home() / "auto-capture"
+            self.storage_dir = Path.home() / "opencapture"
 
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -704,7 +704,7 @@ def main():
     parser = argparse.ArgumentParser(description="Auto Capture - 键鼠行为收集工具")
     parser.add_argument(
         "-d", "--dir",
-        help="存储目录 (默认: ~/auto-capture)",
+        help="存储目录 (默认: ~/opencapture)",
         default=None
     )
 

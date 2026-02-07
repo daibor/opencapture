@@ -19,7 +19,7 @@ class Config:
     DEFAULT_CONFIG = {
         # Basic settings
         "capture": {
-            "output_dir": "~/auto-capture",
+            "output_dir": "~/opencapture",
             "image_format": "webp",
             "image_quality": 80,
             "throttle_ms": 100,
@@ -196,10 +196,10 @@ class Config:
     def _auto_load_config(self):
         """Auto-discover and load configuration file"""
         search_paths = [
+            Path.home() / ".opencapture" / "config.yaml",
             Path.cwd() / "config" / "config.yaml",
             Path.cwd() / "config" / "config.yml",
             Path.cwd() / "config.yaml",
-            Path.home() / ".opencapture" / "config.yaml",
             Path.home() / ".config" / "opencapture" / "config.yaml",
         ]
 
@@ -257,7 +257,7 @@ class Config:
 
     def _expand_all(self):
         """Expand all paths and environment variables"""
-        output_dir = self.get("capture.output_dir", "~/auto-capture")
+        output_dir = self.get("capture.output_dir", "~/opencapture")
         self.set("capture.output_dir", str(Path(output_dir).expanduser()))
 
     def _resolve_env_var(self, value: Any) -> Any:
@@ -385,7 +385,7 @@ class Config:
 
     def get_output_dir(self) -> Path:
         """Get output directory"""
-        return Path(self.get("capture.output_dir", "~/auto-capture")).expanduser()
+        return Path(self.get("capture.output_dir", "~/opencapture")).expanduser()
 
     def get_reports_dir(self) -> Path:
         """Get reports directory"""

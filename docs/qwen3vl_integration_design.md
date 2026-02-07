@@ -250,7 +250,7 @@ SCENE_PROMPTS = {
 ### 6.2 存储结构
 
 ```
-~/auto-capture/
+~/opencapture/
 ├── 2024-02-03/
 │   ├── keys.log               # 键盘日志
 │   ├── images/                # 截图文件

@@ -551,8 +551,8 @@ async def main():
     )
     parser.add_argument(
         "-d", "--dir",
-        default="~/auto-capture",
-        help="Data directory (default: ~/auto-capture)"
+        default="~/opencapture",
+        help="Data directory (default: ~/opencapture)"
     )
     parser.add_argument(
         "--date",
@@ -600,7 +600,7 @@ async def main():
     from .config import init_config
     config = init_config(args.config)
 
-    if args.dir != "~/auto-capture":
+    if args.dir != "~/opencapture":
         config.set("capture.output_dir", str(Path(args.dir).expanduser()))
 
     # Create analyzer

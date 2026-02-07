@@ -61,13 +61,13 @@ KeyLogger + MouseCapture + WindowTracker
 
 ## Configuration
 
-Config priority: Environment variables > `config/config.yaml` > defaults
+Config priority: Environment variables > `~/.opencapture/config.yaml` > defaults
 
 Key environment variables:
 - `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` - Enable remote LLM providers
 - `OLLAMA_API_URL`, `OLLAMA_MODEL` - Local Ollama settings
 
-Copy `config/example.yaml` to `config/config.yaml` for customization. Prompts for image analysis (click/dblclick/drag) and keyboard log analysis are separately configurable.
+Install script auto-creates `~/.opencapture/config.yaml` from `config/example.yaml`. Prompts for image analysis (click/dblclick/drag) and keyboard log analysis are separately configurable.
 
 ## Data Format
 
@@ -75,9 +75,9 @@ Screenshots: `{action}_{HHmmss}_{ms}_{button}_x{X}_y{Y}.webp`
 - Actions: `click_`, `dblclick_`, `drag_`
 - Drag includes: `_to_x{X2}_y{Y2}`
 
-Logs: `~/auto-capture/YYYY-MM-DD/YYYY-MM-DD.log` with window blocks separated by triple newlines.
+Logs: `~/opencapture/YYYY-MM-DD/YYYY-MM-DD.log` with window blocks separated by triple newlines.
 
-Reports: `~/auto-capture/reports/YYYY-MM-DD.md` and `YYYY-MM-DD_images.md`
+Reports: `~/opencapture/reports/YYYY-MM-DD.md` and `YYYY-MM-DD_images.md`
 
 ## macOS Requirements
 

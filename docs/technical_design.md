@@ -66,7 +66,7 @@ OpenCapture is a tool for automatically recording user keyboard and mouse behavi
 ## Directory Structure
 
 ```
-~/auto-capture/                    # Default data directory
+~/opencapture/                    # Default data directory
 ├── 2026-02-05/                    # Organized by date
 │   ├── 2026-02-05.log            # Unified log (keyboard + mouse)
 │   ├── click_103045_*.webp       # Mouse click screenshots
@@ -92,7 +92,7 @@ OpenCapture is a tool for automatically recording user keyboard and mouse behavi
 
 # Basic settings
 capture:
-  output_dir: ~/auto-capture        # Data storage directory
+  output_dir: ~/opencapture        # Data storage directory
   image_format: webp                # Image format
   image_quality: 80                 # Compression quality
 

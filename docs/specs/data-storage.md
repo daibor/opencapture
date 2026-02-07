@@ -28,13 +28,13 @@ All captured data is stored locally in a date-based directory hierarchy. No data
 
 ## Default Output Directory
 
-`~/auto-capture`
+`~/opencapture`
 
 Configurable via:
 1. `--dir` / `-d` CLI argument (highest priority)
 2. `OPENCAPTURE_OUTPUT_DIR` environment variable
 3. `capture.output_dir` in config YAML
-4. Default: `~/auto-capture`
+4. Default: `~/opencapture`
 
 ## Date Directories
 

@@ -12,7 +12,7 @@ NC='\033[0m'
 
 INSTALL_DIR="$HOME/.opencapture"
 BIN_DIR="$HOME/.local/bin"
-DATA_DIR="$HOME/auto-capture"
+DATA_DIR="$HOME/opencapture"
 
 echo ""
 echo -e "${YELLOW}OpenCapture 卸载程序${NC}"

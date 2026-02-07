@@ -67,7 +67,7 @@ class ReportGenerator:
         Initialize report generator
 
         Args:
-            output_dir: Data root directory (e.g., ~/auto-capture)
+            output_dir: Data root directory (e.g., ~/opencapture)
             reports_subdir: Reports subdirectory name
             include_images: Include image references in reports
         """
@@ -728,7 +728,7 @@ async def main():
     parser = argparse.ArgumentParser(description="Generate Markdown analysis reports")
     parser.add_argument(
         "-d", "--dir",
-        default="~/auto-capture",
+        default="~/opencapture",
         help="Data directory"
     )
     parser.add_argument(

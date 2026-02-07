@@ -797,7 +797,11 @@ class MicrophoneCapture:
         if not self._running:
             return
         if not self._recording and _is_device_running(self._device_id):
-            self._start_recording()
+            # Only record if at least one external app is actually using the mic.
+            # Prevents false recordings from transient system activations at startup.
+            clients = self._get_mic_clients()
+            if clients:
+                self._start_recording()
 
     def _debounced_stop(self):
         if not self._running:

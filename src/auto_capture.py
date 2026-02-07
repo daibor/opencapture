@@ -80,17 +80,14 @@ class WindowTracker:
             return ""
 
     def _handle_app_activation(self, notification):
-        """处理应用激活通知"""
+        """处理应用激活通知 - 所有通知都记录到日志"""
         app_name, window_title, bundle_id = self._get_active_window_info()
 
-        # 检查是否变化
-        if (app_name != self.current_app_name or
-            window_title != self.current_window_title):
-            self.current_app_name = app_name
-            self.current_window_title = window_title
-            self.current_bundle_id = bundle_id
+        self.current_app_name = app_name
+        self.current_window_title = window_title
+        self.current_bundle_id = bundle_id
 
-            self.on_window_change(app_name, window_title, bundle_id)
+        self.on_window_change(app_name, window_title, bundle_id)
 
     def start(self):
         """开始监听窗口切换"""
@@ -103,12 +100,12 @@ class WindowTracker:
         self.current_bundle_id = bundle_id
         self.on_window_change(app_name, window_title, bundle_id)
 
-        # 注册通知观察者
+        # 注册通知观察者（显式指定 mainQueue，确保回调在主线程 RunLoop 上派发）
         nc = AppKit.NSWorkspace.sharedWorkspace().notificationCenter()
         self._observer = nc.addObserverForName_object_queue_usingBlock_(
             AppKit.NSWorkspaceDidActivateApplicationNotification,
             None,
-            None,
+            AppKit.NSOperationQueue.mainQueue(),
             self._handle_app_activation
         )
 
@@ -186,6 +183,8 @@ class KeyLogger:
         self._current_app_name = ""
         self._current_window_title = ""
         self._current_bundle_id = ""
+        self._last_flush_app = ""  # 上次 flush 时的应用名（用于键盘聚类分割）
+        self._last_header_app = ""  # 上次写入窗口头的应用名（用于日志分组）
 
     def _get_log_file(self) -> Path:
         """获取当日日志文件路径"""
@@ -194,11 +193,37 @@ class KeyLogger:
         day_dir.mkdir(parents=True, exist_ok=True)
         return day_dir / f"{today}.log"
 
+    def _ensure_app_header(self):
+        """确保当前应用有窗口头（分组用）
+
+        如果当前应用不同于上次写入窗口头的应用，则写入新的窗口头。
+        窗口头用三个换行符分隔，形成应用分组。
+        """
+        if self._current_app_name and self._current_app_name != self._last_header_app:
+            now = datetime.now()
+            timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+
+            # 写入窗口分隔块（三个换行分隔）
+            if self._current_window_title:
+                header = f"\n\n\n[{timestamp}] {self._current_app_name} | {self._current_window_title} ({self._current_bundle_id})\n"
+            else:
+                header = f"\n\n\n[{timestamp}] {self._current_app_name} ({self._current_bundle_id})\n"
+
+            log_file = self._get_log_file()
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(header)
+
+            self._last_header_app = self._current_app_name
+
     def _flush_line(self):
         """将当前行写入文件"""
         if self.current_line and self.line_start_time:
-            timestamp = self.line_start_time.strftime("%Y-%m-%d %H:%M:%S")
-            line = f"[{timestamp}] {self.current_line}\n"
+            # 确保已有窗口头（分组）
+            self._ensure_app_header()
+
+            # 只用时间戳，不重复应用名（已在窗口头显示）
+            timestamp = self.line_start_time.strftime("%H:%M:%S")
+            line = f"[{timestamp}] ⌨️ {self.current_line}\n"
 
             log_file = self._get_log_file()
             with open(log_file, "a", encoding="utf-8") as f:
@@ -255,40 +280,41 @@ class KeyLogger:
         except Exception:
             return ""
 
-    def _check_window_change(self):
-        """检查窗口是否变化，如变化则写入分隔块"""
-        app_name, window_title, bundle_id = self._get_active_window_info()
+    def _update_window_state(self, window_info=None):
+        """更新当前窗口状态（不写日志）
 
-        # 检查是否变化
-        if (app_name != self._current_app_name or
-            window_title != self._current_window_title):
+        Args:
+            window_info: 可选的 (app_name, window_title, bundle_id)。
+                         如果提供则使用该值，否则轮询 frontmostApplication()。
+        """
+        if window_info:
+            app_name, window_title, bundle_id = window_info
+        else:
+            app_name, window_title, bundle_id = self._get_active_window_info()
 
-            # 先刷新当前行
-            self._flush_line()
-
-            # 更新状态
-            self._current_app_name = app_name
-            self._current_window_title = window_title
-            self._current_bundle_id = bundle_id
-
-            # 写入窗口分隔块（三个换行分隔）
-            now = datetime.now()
-            timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
-
-            if window_title:
-                header = f"\n\n\n[{timestamp}] {app_name} | {window_title} ({bundle_id})\n"
-            else:
-                header = f"\n\n\n[{timestamp}] {app_name} ({bundle_id})\n"
-
-            log_file = self._get_log_file()
-            with open(log_file, "a", encoding="utf-8") as f:
-                f.write(header)
+        self._current_app_name = app_name
+        self._current_window_title = window_title
+        self._current_bundle_id = bundle_id
 
     def log_screenshot(self, filename: str, action: str, x: int, y: int,
-                       x2: Optional[int] = None, y2: Optional[int] = None):
-        """记录截图到日志"""
+                       x2: Optional[int] = None, y2: Optional[int] = None,
+                       window_info=None):
+        """记录截图到日志
+
+        Args:
+            window_info: 点击时确定的 (app_name, window_title, bundle_id)。
+                         由 MouseCapture 在点击发生时通过坐标查询获得。
+        """
         with self._lock:
+            # 更新窗口状态
+            if window_info:
+                self._update_window_state(window_info)
+
+            # 确保已有窗口头（分组）
+            self._ensure_app_header()
+
             now = datetime.now()
+            # 只用时间戳，不重复应用名（已在窗口头显示）
             timestamp = now.strftime("%H:%M:%S")
 
             if action == "drag" and x2 is not None:
@@ -300,11 +326,35 @@ class KeyLogger:
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(line)
 
+    def on_window_activated(self, app_name: str, window_title: str, bundle_id: str):
+        """窗口激活通知回调 - 更新状态并在应用切换时写入窗口头
+
+        由 WindowTracker 在收到 NSWorkspaceDidActivateApplicationNotification 时调用。
+        只在应用真正切换时写入窗口头，避免重复。
+        """
+        with self._lock:
+            # 检查是否真的切换了应用
+            if app_name != self._current_app_name:
+                # 刷新之前应用的键盘输入
+                self._flush_line()
+
+            # 更新窗口状态
+            self._current_app_name = app_name
+            self._current_window_title = window_title
+            self._current_bundle_id = bundle_id
+
+            # 确保窗口头（如果是新应用会写入窗口头）
+            self._ensure_app_header()
+
     def log_mic_event(self, event_type: str, detail: str):
-        """记录麦克风事件到日志"""
+        """记录麦克风事件到日志
+
+        注意：麦克风事件归属于实际占用麦克风的应用（已包含在 detail 参数中），
+        而非当前前台窗口。
+        """
         with self._lock:
             now = datetime.now()
-            timestamp = now.strftime("%H:%M:%S")
+            timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
             if event_type == "mic_stop":
                 line = f"[{timestamp}] 🎤 {event_type} {detail}\n"
@@ -330,16 +380,20 @@ class KeyLogger:
             char = f'[{key}]'
 
         with self._lock:
-            # 检查窗口是否变化
-            self._check_window_change()
+            # 更新当前窗口状态
+            self._update_window_state()
 
-            # 检查是否需要新起一行（超过聚类间隔）
-            if self.last_key_time and (now - self.last_key_time) > self.CLUSTER_INTERVAL:
+            # 窗口变化或超过聚类间隔 → 先刷新当前行
+            window_changed = (self._current_app_name != self._last_flush_app)
+            time_gap = self.last_key_time and (now - self.last_key_time) > self.CLUSTER_INTERVAL
+
+            if window_changed or time_gap:
                 self._flush_line()
 
             # 如果是新行，记录开始时间
             if not self.line_start_time:
                 self.line_start_time = now_dt
+                self._last_flush_app = self._current_app_name
 
             # 追加字符
             self.current_line += char
@@ -398,6 +452,71 @@ class MouseCapture:
         monitor = self._sct.monitors[0]
         return monitor["left"], monitor["top"]
 
+    def _get_window_at_point(self, x: int, y: int) -> tuple[str, str, str]:
+        """通过点击坐标确定被点击的窗口 (app_name, window_title, bundle_id)
+
+        使用 CGWindowListCopyWindowInfo 按 z-order 遍历所有窗口，
+        找到包含点击坐标的最上层窗口。这样即使 macOS 尚未完成窗口切换，
+        也能正确识别被点击的窗口。
+        """
+        try:
+            window_list = Quartz.CGWindowListCopyWindowInfo(
+                Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
+                Quartz.kCGNullWindowID
+            )
+            if not window_list:
+                return "Unknown", "", "Unknown"
+
+            for window in window_list:
+                bounds = window.get(Quartz.kCGWindowBounds)
+                if not bounds:
+                    continue
+
+                wx = int(bounds.get("X", 0))
+                wy = int(bounds.get("Y", 0))
+                ww = int(bounds.get("Width", 0))
+                wh = int(bounds.get("Height", 0))
+
+                # 跳过非普通窗口层级（layer 0 = 正常窗口，高层级 = 系统覆盖层/光标等）
+                layer = window.get(Quartz.kCGWindowLayer, -1)
+                if layer != 0:
+                    continue
+
+                # 跳过太小的窗口（菜单、tooltip 等）
+                if ww < 50 or wh < 50:
+                    continue
+
+                if wx <= x <= wx + ww and wy <= y <= wy + wh:
+                    pid = window.get(Quartz.kCGWindowOwnerPID, 0)
+                    owner_name = window.get(Quartz.kCGWindowOwnerName, "Unknown")
+                    window_name = window.get(Quartz.kCGWindowName, "") or ""
+
+                    # 通过 PID 获取 bundle_id
+                    bundle_id = "Unknown"
+                    try:
+                        app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+                        if app:
+                            bundle_id = app.bundleIdentifier() or "Unknown"
+                            owner_name = app.localizedName() or owner_name
+                    except Exception:
+                        pass
+
+                    return owner_name, window_name, bundle_id
+
+            # 没有命中 layer=0 的窗口，回退到 frontmostApplication
+            try:
+                workspace = AppKit.NSWorkspace.sharedWorkspace()
+                active_app = workspace.frontmostApplication()
+                app_name = active_app.localizedName() or "Unknown"
+                bundle_id = active_app.bundleIdentifier() or "Unknown"
+                return app_name, "", bundle_id
+            except Exception:
+                pass
+
+        except Exception:
+            pass
+        return "Unknown", "", "Unknown"
+
     def _get_active_window_bounds(self) -> Optional[tuple[int, int, int, int]]:
         """获取当前活跃窗口的边界 (x, y, width, height)"""
         try:
@@ -437,7 +556,8 @@ class MouseCapture:
 
     def _capture_and_save(self, action: str, button: str,
                           x1: int, y1: int,
-                          x2: Optional[int] = None, y2: Optional[int] = None):
+                          x2: Optional[int] = None, y2: Optional[int] = None,
+                          window_info=None):
         """截图并保存"""
         try:
             # 获取活跃窗口边界（在截图前获取）
@@ -516,7 +636,8 @@ class MouseCapture:
 
             # 记录到日志
             if self.key_logger:
-                self.key_logger.log_screenshot(filename, action, x1, y1, x2, y2)
+                self.key_logger.log_screenshot(filename, action, x1, y1, x2, y2,
+                                               window_info=window_info)
 
             print(f"[Screenshot] {filename}")
 
@@ -557,15 +678,20 @@ class MouseCapture:
                 press_y = self._press_y
                 press_button = self._press_button
 
+            # 在点击发生时立即确定被点击的窗口（避免截图线程中延迟查询导致窗口归属错误）
+            window_info = self._get_window_at_point(x, y)
+
             # 计算拖拽距离
             drag_distance = self._distance(press_x, press_y, x, y)
 
             if drag_distance > self.DRAG_THRESHOLD:
-                # 拖拽
+                # 拖拽 - 使用按下时的坐标确定窗口
+                window_info = self._get_window_at_point(press_x, press_y)
                 action = "drag"
                 thread = threading.Thread(
                     target=self._capture_and_save,
-                    args=(action, button_name, press_x, press_y, x, y)
+                    args=(action, button_name, press_x, press_y, x, y),
+                    kwargs={"window_info": window_info}
                 )
             else:
                 # 点击 - 检查是否双击
@@ -588,7 +714,8 @@ class MouseCapture:
 
                 thread = threading.Thread(
                     target=self._capture_and_save,
-                    args=(action, button_name, x, y)
+                    args=(action, button_name, x, y),
+                    kwargs={"window_info": window_info}
                 )
 
             thread.start()
@@ -612,6 +739,7 @@ class AutoCapture:
 
         self.key_logger = KeyLogger(self.storage_dir)
         self.mouse_capture = MouseCapture(self.storage_dir, self.key_logger)
+        self.window_tracker = WindowTracker(self.key_logger.on_window_activated)
         self.mic_capture = None
 
         if mic_enabled:
@@ -642,6 +770,9 @@ class AutoCapture:
 
         self._running = True
 
+        # 启动窗口切换监听
+        self.window_tracker.start()
+
         # 启动键盘监听
         self._keyboard_listener = keyboard.Listener(
             on_press=self.key_logger.on_key_press
@@ -667,6 +798,7 @@ class AutoCapture:
         self._running = False
 
         # 先停止监听器，防止新事件进入
+        self.window_tracker.stop()
         if self._keyboard_listener:
             self._keyboard_listener.stop()
         if self._mouse_listener:
@@ -689,9 +821,12 @@ class AutoCapture:
         self.start()
 
         try:
-            # 保持运行
+            # 用 NSRunLoop 替代 time.sleep，确保 NSWorkspace 通知能正常派发
+            run_loop = AppKit.NSRunLoop.currentRunLoop()
             while self._running:
-                time.sleep(0.1)
+                # 运转 RunLoop 0.1 秒，处理待派发的通知/事件
+                until = AppKit.NSDate.dateWithTimeIntervalSinceNow_(0.1)
+                run_loop.runUntilDate_(until)
         except KeyboardInterrupt:
             pass
         finally:

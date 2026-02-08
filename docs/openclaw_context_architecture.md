@@ -50,12 +50,12 @@
 - 下午：调研 OpenClaw 记忆系统架构，整理设计文档
 
 ## 关键活动
-- **09:15-11:30** 代码开发：修改 `src/analyzer.py`，重构 LLM 调用逻辑
+- **09:15-11:30** 代码开发：修改 `src/opencapture/analyzer.py`，重构 LLM 调用逻辑
 - **14:00-15:20** 文档阅读：浏览 OpenClaw 官方文档和 GitHub 源码
 - **15:30-17:00** 设计讨论：在 Claude Code 中规划新的上下文架构
 
 ## 使用的工具和资源
-- VSCode: src/analyzer.py, src/report_generator.py
+- VSCode: src/opencapture/analyzer.py, src/opencapture/report_generator.py
 - Chrome: docs.openclaw.ai, github.com/openclaw/openclaw
 - Terminal: git, python
 
@@ -310,7 +310,7 @@
 ### 5.2 输出路径配置
 
 ```yaml
-# config/config.yaml
+# ~/.opencapture/config.yaml
 output:
   # OpenClaw workspace 路径
   openclaw_workspace: ~/.openclaw/workspace
@@ -347,7 +347,7 @@ OpenCapture 输出需要：
 ### 6.1 完整配置示例
 
 ```yaml
-# config/config.yaml
+# ~/.opencapture/config.yaml
 
 # LLM 提供商配置
 llm:
@@ -451,15 +451,15 @@ output:
 ## 七、实施计划
 
 ### Phase 1: Prompt 更新
-- [ ] 更新 `config/example.yaml` 中的 prompt 模板
-- [ ] 修改 `src/config.py` 支持新的配置结构
+- [ ] 更新 `src/opencapture/config/example.yaml` 中的 prompt 模板
+- [ ] 修改 `src/opencapture/config.py` 支持新的配置结构
 
 ### Phase 2: 输出格式重构
-- [ ] 修改 `src/report_generator.py` 实现新的 Markdown 格式
+- [ ] 修改 `src/opencapture/report_generator.py` 实现新的 Markdown 格式
 - [ ] 新增小时级记录生成逻辑
 
 ### Phase 3: 聚合层实现
-- [ ] 新增 `src/aggregator.py` 模块
+- [ ] 新增 `src/opencapture/aggregator.py` 模块
 - [ ] 实现事件 → 时段 → 日级的多层聚合
 
 ### Phase 4: OpenClaw 集成

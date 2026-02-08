@@ -1,11 +1,11 @@
-"""Tests for src/analyzer.py"""
+"""Tests for opencapture/analyzer.py"""
 
 import re
 import pytest
 from pathlib import Path
 
-from src.config import Config
-from src.analyzer import Analyzer
+from opencapture.config import Config
+from opencapture.analyzer import Analyzer
 
 
 # ---------------------------------------------------------------------------

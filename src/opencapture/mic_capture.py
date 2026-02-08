@@ -18,12 +18,16 @@ import ctypes.util
 import os
 import queue
 import struct
+import sys
 import threading
 import time
 import wave
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+if sys.platform != "darwin":
+    raise ImportError("mic_capture requires macOS (Core Audio)")
 
 import sounddevice as sd
 import AppKit

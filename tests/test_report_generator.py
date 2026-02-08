@@ -1,9 +1,9 @@
-"""Tests for src/report_generator.py"""
+"""Tests for opencapture/report_generator.py"""
 
 import pytest
 from pathlib import Path
 
-from src.report_generator import (
+from opencapture.report_generator import (
     ReportGenerator,
     ReportAggregator,
     KeyboardSession,

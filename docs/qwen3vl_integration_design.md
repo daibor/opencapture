@@ -99,14 +99,17 @@ python -m vllm.entrypoints.openai.api_server \
 ```
 opencapture/
 ├── src/
-│   ├── auto_capture.py       # 主模块（需修改）
-│   ├── image_analyzer.py     # 新增：图片分析模块
-│   ├── qwen_client.py        # 新增：Qwen3-VL 客户端
-│   ├── config.py            # 新增：配置管理
-│   └── __init__.py
-├── config/
-│   └── qwen_config.yaml     # 新增：模型配置文件
-└── requirements.txt          # 需更新依赖
+│   └── opencapture/
+│       ├── __init__.py
+│       ├── cli.py                # 统一 CLI 入口
+│       ├── auto_capture.py       # 主模块
+│       ├── analyzer.py           # 分析器（已实现 LLM 集成）
+│       ├── llm_client.py         # LLM 客户端（Ollama/OpenAI/Anthropic）
+│       ├── config.py             # 配置管理
+│       └── config/
+│           └── example.yaml      # 配置示例
+├── pyproject.toml                # 包元数据和依赖
+└── run.py                        # 开发入口
 ```
 
 ### 4.2 ImageAnalyzer 模块

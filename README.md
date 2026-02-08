@@ -16,25 +16,36 @@ Automatic screenshot + AI understanding tool. Records keyboard input, mouse acti
 - **AI Analysis** - Local Ollama or remote APIs (OpenAI, Claude)
 - **Privacy First** - All data processed and stored locally
 
-### Quick Install
+### Install
+
+**Option 1: pip install** (recommended for Python users)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daibor/opencapture/main/install.sh | bash
+pip install opencapture
 ```
 
-Or clone and install manually:
+**Option 2: Clone and develop**
 
 ```bash
 git clone https://github.com/daibor/opencapture.git
 cd opencapture
-./install.sh
+pip install -e ".[dev]"
 ```
+
+**Option 3: Download .app** (macOS)
+
+Download from [GitHub Releases](https://github.com/daibor/opencapture/releases).
 
 ### Usage
 
 ```bash
-# Start capture
+# Start capture (foreground)
 opencapture
+
+# Service management (macOS)
+opencapture start                      # Start as background service
+opencapture stop                       # Stop service
+opencapture status                     # Show running state
 
 # Analyze existing screenshots
 opencapture --analyze today
@@ -51,10 +62,9 @@ opencapture --provider openai --analyze today
 opencapture --help
 ```
 
-Or run directly with Python:
+Or run directly with Python (from cloned repo):
 
 ```bash
-source venv/bin/activate
 python run.py
 python run.py -d ~/my-captures
 ```
@@ -63,18 +73,18 @@ Press `Ctrl+C` to stop.
 
 ### System Requirements
 
-- **macOS** 10.15+ or **Linux** (Ubuntu 20.04+)
-- Python 3.9+
+- **macOS** 10.15+ (capture + analysis)
+- **Linux / Windows** (analysis only)
+- Python 3.11+
 - 8GB+ RAM (for AI analysis)
 - 10GB+ disk space (for model storage)
 
 #### macOS Permissions
 
-First run requires authorization in System Settings → Privacy & Security:
+First run requires authorization in System Settings > Privacy & Security:
 - **Accessibility** - For keyboard/mouse event listening
 - **Screen Recording** - For screen capture
-
-Restart terminal after authorization.
+- **Microphone** - For audio recording (if enabled)
 
 ### Data Storage
 
@@ -96,7 +106,7 @@ Default location: `~/opencapture/`
 
 ### Configuration
 
-The install script automatically creates `~/.opencapture/config.yaml`. Edit it to customize:
+Edit `~/.opencapture/config.yaml` to customize:
 
 ```bash
 vim ~/.opencapture/config.yaml
@@ -115,8 +125,11 @@ Environment variables:
 ### Uninstall
 
 ```bash
-./uninstall.sh
+pip uninstall opencapture
 ```
+
+To also remove captured data: `rm -rf ~/opencapture`
+To remove config: `rm -rf ~/.opencapture`
 
 ### Privacy Warning
 
@@ -139,25 +152,36 @@ This tool records all keyboard input (including passwords) and screen content. P
 - **AI 分析** - 支持本地 Ollama 或远程 API（OpenAI、Claude）
 - **隐私安全** - 所有数据本地处理存储
 
-### 一键安装
+### 安装
+
+**方式一：pip install**（推荐 Python 用户）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daibor/opencapture/main/install.sh | bash
+pip install opencapture
 ```
 
-或克隆后手动安装：
+**方式二：克隆开发**
 
 ```bash
 git clone https://github.com/daibor/opencapture.git
 cd opencapture
-./install.sh
+pip install -e ".[dev]"
 ```
+
+**方式三：下载 .app**（macOS）
+
+从 [GitHub Releases](https://github.com/daibor/opencapture/releases) 下载。
 
 ### 使用方法
 
 ```bash
-# 启动采集
+# 启动采集（前台运行）
 opencapture
+
+# 服务管理（macOS）
+opencapture start                      # 后台启动
+opencapture stop                       # 停止服务
+opencapture status                     # 查看运行状态
 
 # 分析已有截图
 opencapture --analyze today
@@ -174,10 +198,9 @@ opencapture --provider openai --analyze today
 opencapture --help
 ```
 
-或使用 Python 直接运行：
+或使用 Python 直接运行（从克隆的仓库）：
 
 ```bash
-source venv/bin/activate
 python run.py
 python run.py -d ~/my-captures
 ```
@@ -186,8 +209,9 @@ python run.py -d ~/my-captures
 
 ### 系统要求
 
-- **macOS** 10.15+ 或 **Linux**（Ubuntu 20.04+）
-- Python 3.9+
+- **macOS** 10.15+（采集 + 分析）
+- **Linux / Windows**（仅分析功能）
+- Python 3.11+
 - 8GB+ 内存（AI 分析需要）
 - 10GB+ 磁盘空间（模型存储）
 
@@ -196,8 +220,7 @@ python run.py -d ~/my-captures
 首次运行需在「系统设置 → 隐私与安全性」中授权：
 - **辅助功能** - 监听键鼠事件
 - **屏幕录制** - 截取屏幕
-
-授权后重启终端。
+- **麦克风** - 音频录制（如启用）
 
 ### 数据存储
 
@@ -249,7 +272,7 @@ python run.py -d ~/my-captures
 
 ### 配置
 
-安装脚本会自动创建 `~/.opencapture/config.yaml`，直接编辑即可：
+编辑 `~/.opencapture/config.yaml`：
 
 ```bash
 vim ~/.opencapture/config.yaml
@@ -268,8 +291,11 @@ vim ~/.opencapture/config.yaml
 ### 卸载
 
 ```bash
-./uninstall.sh
+pip uninstall opencapture
 ```
+
+同时删除采集数据：`rm -rf ~/opencapture`
+删除配置：`rm -rf ~/.opencapture`
 
 ### 隐私警告
 

@@ -4,7 +4,7 @@ Auto Capture - 自动收集键盘和鼠标行为的工具
 """
 
 import os
-
+import sys
 import threading
 import time
 from datetime import datetime
@@ -15,9 +15,10 @@ from pynput import keyboard, mouse
 from PIL import Image, ImageDraw
 import mss
 
-# macOS 专用
-import AppKit
-import Quartz
+# macOS-only
+if sys.platform == "darwin":
+    import AppKit
+    import Quartz
 
 
 class WindowTracker:
@@ -794,7 +795,7 @@ class AutoCapture:
 
         if mic_enabled:
             try:
-                from src.mic_capture import MicrophoneCapture
+                from opencapture.mic_capture import MicrophoneCapture
                 cfg = mic_config or {}
                 self.mic_capture = MicrophoneCapture(
                     storage_dir=self.storage_dir,
@@ -916,6 +917,11 @@ class AutoCapture:
 
     def run(self):
         """运行（阻塞）"""
+        if sys.platform != "darwin":
+            print("[AutoCapture] Capture is currently macOS-only.")
+            print("Analysis works on all platforms: opencapture --analyze today")
+            sys.exit(1)
+
         if not self._check_accessibility(prompt=False):
             import sys
             print("[AutoCapture] Requesting Accessibility permission...")

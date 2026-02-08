@@ -197,14 +197,14 @@ class BaseLLMClient(ABC):
 
 | File | Status | Description |
 |------|--------|-------------|
-| `src/llm_client.py` | ✅ Done | LLM unified interface with Ollama/OpenAI/Anthropic |
-| `src/report_generator.py` | ✅ Done | Markdown report generator |
-| `src/analyzer.py` | ✅ Done | Unified analyzer integrating all modules |
-| `src/config.py` | ✅ Done | Extended configuration, multi-provider support |
-| `config/example.yaml` | ✅ Done | Complete example configuration |
-| `run.py` | ✅ Done | Unified entry for capture and analysis modes |
-| `install.sh` | ✅ Done | Updated installation script |
-| `requirements.txt` | ✅ Done | Updated dependencies |
+| `src/opencapture/llm_client.py` | ✅ Done | LLM unified interface with Ollama/OpenAI/Anthropic |
+| `src/opencapture/report_generator.py` | ✅ Done | Markdown report generator |
+| `src/opencapture/analyzer.py` | ✅ Done | Unified analyzer integrating all modules |
+| `src/opencapture/config.py` | ✅ Done | Extended configuration, multi-provider support |
+| `src/opencapture/cli.py` | ✅ Done | Unified CLI: capture, analysis, service management |
+| `src/opencapture/config/example.yaml` | ✅ Done | Complete example configuration |
+| `run.py` | ✅ Done | Development entry point (thin wrapper) |
+| `pyproject.toml` | ✅ Done | Package metadata and dependencies |
 
 ### Core Features
 
@@ -230,15 +230,17 @@ class BaseLLMClient(ABC):
 
 | File | Description |
 |------|-------------|
-| `src/auto_capture.py` | Keyboard/mouse event capture |
-| `src/llm_client.py` | LLM clients (Ollama/OpenAI/Anthropic) |
-| `src/report_generator.py` | Markdown report generation |
-| `src/analyzer.py` | Unified analyzer |
-| `src/config.py` | Configuration management |
-| `config/example.yaml` | Example configuration |
-| `run.py` | Main entry point |
-| `install.sh` | Installation script |
-| `uninstall.sh` | Uninstallation script |
+| `src/opencapture/auto_capture.py` | Keyboard/mouse event capture |
+| `src/opencapture/mic_capture.py` | Microphone monitoring (macOS Core Audio) |
+| `src/opencapture/llm_client.py` | LLM clients (Ollama/OpenAI/Anthropic) |
+| `src/opencapture/report_generator.py` | Markdown report generation |
+| `src/opencapture/analyzer.py` | Unified analyzer |
+| `src/opencapture/config.py` | Configuration management |
+| `src/opencapture/cli.py` | Unified CLI: capture, analysis, service management |
+| `src/opencapture/config/example.yaml` | Example configuration |
+| `run.py` | Development entry point |
+| `pyproject.toml` | Package metadata and dependencies |
+| `packaging/macos.spec` | PyInstaller spec for macOS .app bundle |
 
 ---
 

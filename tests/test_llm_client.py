@@ -1,9 +1,9 @@
-"""Tests for src/llm_client.py"""
+"""Tests for opencapture/llm_client.py"""
 
 import pytest
 from pathlib import Path
 
-from src.llm_client import (
+from opencapture.llm_client import (
     AnalysisResult,
     BaseLLMClient,
     OpenAIClient,

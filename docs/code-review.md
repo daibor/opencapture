@@ -149,7 +149,7 @@ analyze_day(date_str)
 
 #### 1. mss 截图实例非线程安全
 
-**位置**: `src/auto_capture.py:425`
+**位置**: `src/opencapture/auto_capture.py`
 
 `MouseCapture.__init__` 中创建了一个 `self._sct = mss.mss()` 实例，但 `_capture_and_save()` 在独立线程中运行。快速连续点击时，多个线程会同时调用 `self._sct.grab()`，而 mss 不是线程安全的，可能导致截图损坏或段错误。
 
@@ -157,7 +157,7 @@ analyze_day(date_str)
 
 #### 2. aiohttp Session 泄漏
 
-**位置**: `src/llm_client.py` 全文
+**位置**: `src/opencapture/llm_client.py` 全文
 
 `BaseLLMClient` 实现了 `__aenter__`/`__aexit__` 用于关闭 session，但 `LLMRouter._init_clients()` 直接实例化客户端，不通过 context manager。同样 `ASRClient` 也有此问题。分析完成后 session 不会被关闭，导致连接泄漏和 `ResourceWarning`。
 
@@ -165,7 +165,7 @@ analyze_day(date_str)
 
 #### 3. ASRClient 文件句柄泄漏
 
-**位置**: `src/llm_client.py:855`
+**位置**: `src/opencapture/llm_client.py`
 
 ```python
 data.add_field("file", open(audio_path, "rb"), ...)
@@ -177,7 +177,7 @@ data.add_field("file", open(audio_path, "rb"), ...)
 
 #### 4. 双击产生冗余截图
 
-**位置**: `src/auto_capture.py:697-720`
+**位置**: `src/opencapture/auto_capture.py`
 
 双击检测发生在第二次释放时，但第一次释放已经触发了一次 click 截图。结果是每次双击会产生两张截图（一张 click + 一张 dblclick），浪费存储并导致日志有误导性记录。
 
@@ -187,7 +187,7 @@ data.add_field("file", open(audio_path, "rb"), ...)
 
 #### 5. 每次按键都查询窗口状态
 
-**位置**: `src/auto_capture.py:384-385`
+**位置**: `src/opencapture/auto_capture.py`
 
 ```python
 def on_key_press(self, key):
@@ -202,7 +202,7 @@ def on_key_press(self, key):
 
 #### 6. 窗口信息查询逻辑重复
 
-**位置**: `src/auto_capture.py:34-81` 和 `src/auto_capture.py:236-282`
+**位置**: `src/opencapture/auto_capture.py`（WindowTracker 和 KeyLogger 两处）
 
 `WindowTracker._get_window_title()` 和 `KeyLogger._get_window_title()` 是完全相同的两套实现。`_get_active_window_info()` 也在两个类中重复。
 
@@ -210,7 +210,7 @@ def on_key_press(self, key):
 
 #### 7. 全屏截图在多显示器下效率低
 
-**位置**: `src/auto_capture.py:568`
+**位置**: `src/opencapture/auto_capture.py`
 
 ```python
 monitor = self._sct.monitors[0]  # monitors[0] 是所有显示器的合并区域
@@ -223,7 +223,7 @@ screenshot = self._sct.grab(monitor)
 
 #### 8. 线程列表无上限增长
 
-**位置**: `src/auto_capture.py:722-726`
+**位置**: `src/opencapture/auto_capture.py`
 
 ```python
 thread.start()
@@ -238,7 +238,7 @@ self._active_threads = [t for t in self._active_threads if t.is_alive()]
 
 #### 9. MicrophoneCapture 防抖存在竞态
 
-**位置**: `src/mic_capture.py:784-791`
+**位置**: `src/opencapture/mic_capture.py`
 
 ```python
 def _schedule_stop(self):
@@ -267,20 +267,15 @@ def _schedule_stop(self):
 
 #### 12. Linux 支持不完整
 
-**位置**: `src/auto_capture.py:19-20`
+**位置**: `src/opencapture/auto_capture.py`
 
-```python
-import AppKit
-import Quartz
-```
+~~`auto_capture.py` 在模块顶部无条件导入 macOS 专用模块。~~
 
-`auto_capture.py` 在模块顶部无条件导入 macOS 专用模块。在 Linux 上 `import` 阶段就会报错。虽然 `install.sh` 在 Linux 上跳过 pyobjc 安装，但代码层面没有平台判断。
-
-**建议**: 用条件导入包裹 macOS 专用模块，或在 Linux 上提供替代实现。
+**已修复**: 重构后已改为 `if sys.platform == "darwin"` 条件导入。`mic_capture.py` 也加入了平台检查。
 
 #### 13. Ollama 模型名匹配过于严格
 
-**位置**: `src/llm_client.py:155`
+**位置**: `src/opencapture/llm_client.py`
 
 ```python
 if self.model in models:
@@ -292,7 +287,7 @@ Ollama 列出的模型名可能带有版本标签（如 `qwen2-vl:7b` vs `qwen2-
 
 #### 14. Config 路径展开不完整
 
-**位置**: `src/config.py:240-243`
+**位置**: `src/opencapture/config.py`
 
 `_expand_all()` 只展开了 `capture.output_dir`。如果用户在其他路径配置项中使用 `~`（如 `logging.file`），不会被展开。
 
@@ -302,23 +297,15 @@ Ollama 列出的模型名可能带有版本标签（如 `qwen2-vl:7b` vs `qwen2-
 
 #### 16. 窗口头写入可能丢失标题
 
-**位置**: `src/auto_capture.py:203`
+**位置**: `src/opencapture/auto_capture.py`
 
 `_ensure_app_header()` 只比较应用名（`_current_app_name != _last_header_app`）。如果用户在同一应用的不同窗口间切换（如 Chrome 的两个 tab），不会写入新的窗口头，日志中的窗口标题信息不准确。
 
 **建议**: 同时比较窗口标题。
 
-#### 17. install.sh 配置文件目标路径不一致
+#### 17. ~~install.sh 配置文件目标路径不一致~~
 
-**位置**: `install.sh:614-623`
-
-```bash
-CONFIG_FILE="$INSTALL_DIR/config.yaml"  # ~/.opencapture/config.yaml
-```
-
-config 被复制到 `~/.opencapture/config.yaml`，这与 `Config._auto_load_config()` 的搜索路径一致，没问题。但 CLAUDE.md 中说"Install script auto-creates `~/.opencapture/config.yaml`"，而实际路径是 `$INSTALL_DIR/config.yaml`（也是 `~/.opencapture/config.yaml`），一致。
-
-但注意：`$INSTALL_DIR` 是源码安装目录，config.yaml 与源码混在一起。用户修改 config 后再运行 `install.sh` 更新，`rsync` 不会覆盖 config（因为不在 git 跟踪中），所以实际上是安全的。
+**已移除**: `install.sh` 已在重构中删除。现在通过 `pip install opencapture` 安装，配置文件示例打包在 `src/opencapture/config/example.yaml` 中。
 
 ---
 
@@ -330,7 +317,7 @@ config 被复制到 `~/.opencapture/config.yaml`，这与 `Config._auto_load_con
 - **线程安全意识**: KeyLogger 的所有日志写入都通过 `_lock` 保护
 - **隐私保护设计**: `privacy.allow_online` 默认关闭，远程分析需要显式确认
 - **窗口归属准确性**: 鼠标点击时通过坐标查 CGWindowList 确定目标窗口，而非简单取前台应用
-- **安装体验**: install.sh 支持本地安装 / 远程 clone / 增量更新，LaunchAgent 自启动
+- **安装体验**: 三种分发方式（pip install / clone+run.py / PyInstaller .app），LaunchAgent 自启动
 
 ### 需要改进的部分
 

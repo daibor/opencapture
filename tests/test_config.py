@@ -1,9 +1,9 @@
-"""Tests for src/config.py"""
+"""Tests for opencapture/config.py"""
 
 import pytest
 from pathlib import Path
 
-from src.config import Config, get_config, init_config, reset_config
+from opencapture.config import Config, get_config, init_config, reset_config
 
 
 # ---------------------------------------------------------------------------

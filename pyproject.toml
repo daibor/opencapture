@@ -1,11 +1,11 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "opencapture"
 version = "0.2.0"
-description = "macOS/Linux tool that records keyboard and mouse activity, captures screenshots, and uses AI to analyze user behavior"
+description = "Record keyboard/mouse activity, capture screenshots, and analyze with AI"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -22,6 +22,9 @@ dependencies = [
     "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
 ]
 
+[project.scripts]
+opencapture = "opencapture.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
@@ -29,9 +32,13 @@ dev = [
     "pytest-cov>=5.0",
 ]
 
+[tool.setuptools]
+packages = ["opencapture"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+opencapture = ["config/*.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-
-[tool.setuptools.packages.find]
-include = ["src*"]

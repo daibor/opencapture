@@ -42,10 +42,7 @@ htmlcov/
 .mypy_cache/
 
 # Config files with user settings
-config/*.yaml
-config/*.yml
-config/*.json
-!config/example.yaml
+config/
 
 # Logs
 *.log

@@ -74,6 +74,12 @@ class BaseLLMClient(ABC):
         if not self.session:
             self.session = aiohttp.ClientSession()
 
+    async def close(self):
+        """Close the underlying aiohttp session"""
+        if self.session:
+            await self.session.close()
+            self.session = None
+
     def _encode_image(self, image_path: str) -> Optional[str]:
         """Encode image to base64"""
         try:
@@ -793,6 +799,13 @@ class LLMRouter:
             )
         return await self.asr_client.transcribe(audio_path)
 
+    async def close(self):
+        """Close all client sessions"""
+        for client in self.clients.values():
+            await client.close()
+        if self.asr_client:
+            await self.asr_client.close()
+
 
 class ASRClient:
     """OpenAI-compatible ASR client for audio transcription.
@@ -826,6 +839,12 @@ class ASRClient:
         if not self.session:
             self.session = aiohttp.ClientSession()
 
+    async def close(self):
+        """Close the underlying aiohttp session"""
+        if self.session:
+            await self.session.close()
+            self.session = None
+
     async def transcribe(self, audio_path: str) -> AnalysisResult:
         """Transcribe an audio file to text.
 
@@ -849,19 +868,20 @@ class ASRClient:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        data = aiohttp.FormData()
-        data.add_field(
-            "file",
-            open(audio_path, "rb"),
-            filename=audio_path.name,
-            content_type="audio/wav",
-        )
-        data.add_field("model", self.model)
-        if self.language:
-            data.add_field("language", self.language)
-        data.add_field("response_format", "text")
-
+        file_handle = open(audio_path, "rb")
         try:
+            data = aiohttp.FormData()
+            data.add_field(
+                "file",
+                file_handle,
+                filename=audio_path.name,
+                content_type="audio/wav",
+            )
+            data.add_field("model", self.model)
+            if self.language:
+                data.add_field("language", self.language)
+            data.add_field("response_format", "text")
+
             async with self.session.post(
                 f"{self.api_url}/audio/transcriptions",
                 headers=headers,
@@ -907,6 +927,8 @@ class ASRClient:
                 provider="asr",
                 inference_time=time.time() - start_time,
             )
+        finally:
+            file_handle.close()
 
     async def health_check(self) -> bool:
         """Check if the ASR service is reachable."""

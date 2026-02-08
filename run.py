@@ -6,6 +6,7 @@ Supports capture mode and analysis mode
 
 import argparse
 import asyncio
+import signal
 import sys
 from pathlib import Path
 
@@ -25,6 +26,12 @@ def run_capture(args):
         mic_enabled=capture_config.get("mic_enabled", False),
         mic_config=capture_config,
     )
+
+    # Handle SIGTERM for clean shutdown (e.g. launchctl stop)
+    def handle_term(signum, frame):
+        capture._running = False
+
+    signal.signal(signal.SIGTERM, handle_term)
     capture.run()
 
 
@@ -39,6 +46,14 @@ async def run_analyze(args):
 
     analyzer = Analyzer(config)
 
+    try:
+        await _run_analyze_inner(analyzer, args, config)
+    finally:
+        await analyzer.close()
+
+
+async def _run_analyze_inner(analyzer, args, config):
+    """Analysis logic (called inside try/finally to ensure cleanup)"""
     # Health check
     if args.health_check:
         print("Checking LLM services...")
@@ -206,8 +221,29 @@ Examples:
         action="store_true",
         help="List available dates"
     )
-
+    parser.add_argument(
+        "--check-permission",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--check-permission-quiet",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
+
+    # Permission check mode (used by launcher via .app executable)
+    if args.check_permission:
+        from src.auto_capture import AutoCapture
+        if AutoCapture._check_accessibility(prompt=False):
+            sys.exit(0)
+        AutoCapture._check_accessibility(prompt=True)
+        sys.exit(1)
+
+    if args.check_permission_quiet:
+        from src.auto_capture import AutoCapture
+        sys.exit(0 if AutoCapture._check_accessibility(prompt=False) else 1)
 
     # Determine run mode
     if args.analyze or args.image or args.audio or args.health_check or args.list_dates:

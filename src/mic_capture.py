@@ -380,14 +380,14 @@ class MicrophoneCapture:
         key_logger=None,
         sample_rate: int = 16000,
         channels: int = 1,
-        start_debounce_ms: int = 500,
-        stop_debounce_ms: int = 2000,
+        min_duration_ms: int = 500,
+        stop_debounce_ms: int = 300,
     ):
         self.storage_dir = storage_dir
         self.key_logger = key_logger
         self.sample_rate = sample_rate
         self.channels = channels
-        self.start_debounce_s = start_debounce_ms / 1000.0
+        self.min_duration_ms = min_duration_ms
         self.stop_debounce_s = stop_debounce_ms / 1000.0
 
         self._lock = threading.Lock()
@@ -398,8 +398,7 @@ class MicrophoneCapture:
         # Monitor thread
         self._monitor_thread: Optional[threading.Thread] = None
 
-        # Debounce timers
-        self._start_timer: Optional[threading.Timer] = None
+        # Debounce timer
         self._stop_timer: Optional[threading.Timer] = None
 
         # Recording state
@@ -412,6 +411,8 @@ class MicrophoneCapture:
         self._temp_filepath: Optional[Path] = None
         self._primary_app: str = "unknown"
         self._primary_bundle: str = "unknown"
+        self._start_timestamp: Optional[str] = None
+        self._start_detail: str = ""
 
         # Current mic client set: {bundle_id: app_name}
         self._current_clients: dict[str, str] = {}
@@ -486,8 +487,7 @@ class MicrophoneCapture:
         """Stop monitoring and finalize any active recording."""
         self._running = False
 
-        # Cancel pending debounce timers
-        self._cancel_timer("start")
+        # Cancel pending debounce timer
         self._cancel_timer("stop")
 
         # Stop active recording
@@ -594,14 +594,24 @@ class MicrophoneCapture:
             print(f"[Mic] Poll error: {e}")
 
     def _handle_mic_active(self):
-        """Handle mic becoming active — schedule recording start."""
+        """Handle mic becoming active — start recording immediately."""
         self._cancel_timer("stop")
         if not self._recording:
-            self._schedule_start()
+            # Defer off callback thread to avoid blocking Core Audio
+            threading.Thread(
+                target=self._try_start_recording, daemon=True, name="mic-start"
+            ).start()
+
+    def _try_start_recording(self):
+        """Start recording if external clients are present (runs off callback thread)."""
+        if self._recording or not self._running:
+            return
+        clients = self._get_mic_clients()
+        if clients:
+            self._start_recording(clients=clients)
 
     def _handle_all_clients_left(self):
         """Handle all external mic clients leaving — schedule recording stop."""
-        self._cancel_timer("start")
         if self._recording:
             self._schedule_stop()
 
@@ -683,7 +693,6 @@ class MicrophoneCapture:
             # Device truly not running (no process has it, including us)
             # This fires when we're NOT recording and the last external user stopped,
             # or if the device is physically disconnected.
-            self._cancel_timer("start")
             if self._recording:
                 self._handle_all_clients_left()
 
@@ -768,21 +777,9 @@ class MicrophoneCapture:
 
     def _cancel_timer(self, which: str):
         with self._lock:
-            if which == "start" and self._start_timer:
-                self._start_timer.cancel()
-                self._start_timer = None
-            elif which == "stop" and self._stop_timer:
+            if which == "stop" and self._stop_timer:
                 self._stop_timer.cancel()
                 self._stop_timer = None
-
-    def _schedule_start(self):
-        self._cancel_timer("start")
-        with self._lock:
-            self._start_timer = threading.Timer(
-                self.start_debounce_s, self._debounced_start
-            )
-            self._start_timer.daemon = True
-            self._start_timer.start()
 
     def _schedule_stop(self):
         self._cancel_timer("stop")
@@ -792,16 +789,6 @@ class MicrophoneCapture:
             )
             self._stop_timer.daemon = True
             self._stop_timer.start()
-
-    def _debounced_start(self):
-        if not self._running:
-            return
-        if not self._recording and _is_device_running(self._device_id):
-            # Only record if at least one external app is actually using the mic.
-            # Prevents false recordings from transient system activations at startup.
-            clients = self._get_mic_clients()
-            if clients:
-                self._start_recording()
 
     def _debounced_stop(self):
         if not self._running:
@@ -863,15 +850,22 @@ class MicrophoneCapture:
         """Sanitize app name for use in filenames."""
         return name.lower().replace(" ", "-").replace("/", "-").replace(".", "-")
 
-    def _start_recording(self):
-        """Begin recording microphone audio."""
+    def _start_recording(self, clients: Optional[dict[str, str]] = None):
+        """Begin recording microphone audio.
+
+        Args:
+            clients: Pre-queried {bundle_id: app_name} dict from the caller.
+                     Avoids a second _get_mic_clients() call that may miss
+                     short-lived external clients due to timing.
+        """
         with self._lock:
             if self._recording:
                 return
             self._recording = True
 
-        # Identify mic clients
-        clients = self._get_mic_clients()
+        # Use caller-provided clients or query fresh
+        if clients is None:
+            clients = self._get_mic_clients()
         if clients:
             self._current_clients = clients.copy()
         else:
@@ -882,11 +876,12 @@ class MicrophoneCapture:
         self._primary_app = self._current_clients[first_bundle]
         self._primary_bundle = first_bundle
 
-        # Log mic_start
-        self._log_event("mic_start", self._format_clients(self._current_clients))
+        # Store start info for deferred logging (logged at stop if duration >= min_duration)
+        self._record_start_time = datetime.now()
+        self._start_timestamp = self._record_start_time.strftime("%Y-%m-%d %H:%M:%S")
+        self._start_detail = self._format_clients(self._current_clients)
 
         # Prepare WAV file (temporary name without duration)
-        self._record_start_time = datetime.now()
         ts = self._record_start_time.strftime("%H%M%S")
         ms = self._record_start_time.strftime("%f")[:3]
         app_slug = self._sanitize_app_name(self._primary_app)
@@ -967,31 +962,46 @@ class MicrophoneCapture:
                 pass
             self._wav_file = None
 
-        # Compute duration and rename file
-        duration = 0
-        final_path = self._temp_filepath
-        if self._record_start_time and self._temp_filepath:
-            duration = int((datetime.now() - self._record_start_time).total_seconds())
-            if duration < 1:
-                duration = 1
+        # Compute duration
+        duration_ms = 0
+        if self._record_start_time:
+            duration_ms = int((datetime.now() - self._record_start_time).total_seconds() * 1000)
+
+        if duration_ms < self.min_duration_ms:
+            # Discard short recording (transient mic activation)
+            if self._temp_filepath and self._temp_filepath.exists():
+                try:
+                    self._temp_filepath.unlink()
+                except OSError:
+                    pass
+            print(f"[Mic] Discarded short recording ({duration_ms}ms < {self.min_duration_ms}ms)")
+        else:
             # Rename: mic_HHmmss_ms_app.wav.tmp → mic_HHmmss_ms_app_durN.wav
-            stem = self._temp_filepath.stem.replace(".wav", "")
-            final_name = f"{stem}_dur{duration}.wav"
-            final_path = self._temp_filepath.parent / final_name
-            try:
-                self._temp_filepath.rename(final_path)
-            except Exception as e:
-                print(f"[Mic] Failed to rename file: {e}")
-                final_path = self._temp_filepath
+            duration = max(1, duration_ms // 1000)
+            final_path = self._temp_filepath
+            if self._temp_filepath:
+                stem = self._temp_filepath.stem.replace(".wav", "")
+                final_name = f"{stem}_dur{duration}.wav"
+                final_path = self._temp_filepath.parent / final_name
+                try:
+                    self._temp_filepath.rename(final_path)
+                except Exception as e:
+                    print(f"[Mic] Failed to rename file: {e}")
+                    final_path = self._temp_filepath
 
-        filename = final_path.name
-        self._log_event("mic_stop", f"({duration}s) {filename}")
+            filename = final_path.name if final_path else "unknown"
 
-        print(f"[Mic] Recording stopped: {filename} ({duration}s)")
+            # Log mic_start (with actual start timestamp) and mic_stop together
+            self._log_event("mic_start", self._start_detail, timestamp=self._start_timestamp)
+            self._log_event("mic_stop", f"({duration}s) {filename}")
+
+            print(f"[Mic] Recording stopped: {filename} ({duration}s)")
 
         # Reset state
         self._record_start_time = None
         self._temp_filepath = None
+        self._start_timestamp = None
+        self._start_detail = ""
         self._current_clients.clear()
 
     def _audio_callback(self, indata, frames, time_info, status):
@@ -1022,10 +1032,10 @@ class MicrophoneCapture:
     # Log integration
     # ============================================================
 
-    def _log_event(self, event_type: str, detail: str):
+    def _log_event(self, event_type: str, detail: str, timestamp: Optional[str] = None):
         """Write a microphone event to the daily log file."""
         if self.key_logger:
-            self.key_logger.log_mic_event(event_type, detail)
+            self.key_logger.log_mic_event(event_type, detail, timestamp=timestamp)
         else:
-            now = datetime.now().strftime("%H:%M:%S")
-            print(f"[{now}] 🎤 {event_type} | {detail}")
+            ts = timestamp or datetime.now().strftime("%H:%M:%S")
+            print(f"[{ts}] 🎤 {event_type} | {detail}")

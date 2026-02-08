@@ -4,6 +4,7 @@ Auto Capture - 自动收集键盘和鼠标行为的工具
 """
 
 import os
+
 import threading
 import time
 from datetime import datetime
@@ -346,15 +347,15 @@ class KeyLogger:
             # 确保窗口头（如果是新应用会写入窗口头）
             self._ensure_app_header()
 
-    def log_mic_event(self, event_type: str, detail: str):
+    def log_mic_event(self, event_type: str, detail: str, timestamp: str = None):
         """记录麦克风事件到日志
 
         注意：麦克风事件归属于实际占用麦克风的应用（已包含在 detail 参数中），
         而非当前前台窗口。
         """
         with self._lock:
-            now = datetime.now()
-            timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+            if timestamp is None:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             if event_type == "mic_stop":
                 line = f"[{timestamp}] 🎤 {event_type} {detail}\n"
@@ -421,7 +422,6 @@ class MouseCapture:
         self.storage_dir = storage_dir
         self.key_logger = key_logger
         self._lock = threading.Lock()
-        self._sct = mss.mss()
 
         # 按下状态记录
         self._press_time: float = 0
@@ -433,6 +433,10 @@ class MouseCapture:
         self._last_click_time: float = 0
         self._last_click_x: int = 0
         self._last_click_y: int = 0
+
+        # 延迟单击（等待双击判定窗口过期后再触发，避免双击产生冗余截图）
+        self._pending_click_timer: Optional[threading.Timer] = None
+        self._pending_click_args: Optional[tuple] = None  # (button_name, x, y, window_info)
 
         # 节流
         self._last_capture_time: float = 0
@@ -446,11 +450,6 @@ class MouseCapture:
         day_dir = self.storage_dir / today
         day_dir.mkdir(parents=True, exist_ok=True)
         return day_dir
-
-    def _get_monitor_offset(self) -> tuple[int, int]:
-        """获取拼接图像的坐标偏移"""
-        monitor = self._sct.monitors[0]
-        return monitor["left"], monitor["top"]
 
     def _get_window_at_point(self, x: int, y: int) -> tuple[str, str, str]:
         """通过点击坐标确定被点击的窗口 (app_name, window_title, bundle_id)
@@ -563,15 +562,14 @@ class MouseCapture:
             # 获取活跃窗口边界（在截图前获取）
             window_bounds = self._get_active_window_bounds()
 
-            # 截取所有显示器
-            monitor = self._sct.monitors[0]
-            screenshot = self._sct.grab(monitor)
+            # 每个线程创建独立的 mss 实例（mss 非线程安全）
+            with mss.mss() as sct:
+                monitor = sct.monitors[0]
+                screenshot = sct.grab(monitor)
+                offset_x, offset_y = monitor["left"], monitor["top"]
 
             # 转换为 PIL Image
             img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
-
-            # 获取坐标偏移并转换
-            offset_x, offset_y = self._get_monitor_offset()
             img_x1 = x1 - offset_x
             img_y1 = y1 - offset_y
 
@@ -648,8 +646,58 @@ class MouseCapture:
         """计算两点距离"""
         return ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
 
+    def _cancel_pending_click(self):
+        """取消挂起的单击（调用者需持有 self._lock）"""
+        if self._pending_click_timer:
+            self._pending_click_timer.cancel()
+            self._pending_click_timer = None
+            self._pending_click_args = None
+
+    def _fire_pending_click(self):
+        """触发挂起的单击截图（由 Timer 线程调用）"""
+        with self._lock:
+            args = self._pending_click_args
+            self._pending_click_timer = None
+            self._pending_click_args = None
+        if args:
+            button_name, x, y, window_info = args
+            self._start_capture_thread("click", button_name, x, y,
+                                       window_info=window_info)
+
+    def _start_capture_thread(self, action, button_name, x1, y1,
+                              x2=None, y2=None, window_info=None):
+        """启动截图线程"""
+        if x2 is not None:
+            thread = threading.Thread(
+                target=self._capture_and_save,
+                args=(action, button_name, x1, y1, x2, y2),
+                kwargs={"window_info": window_info}
+            )
+        else:
+            thread = threading.Thread(
+                target=self._capture_and_save,
+                args=(action, button_name, x1, y1),
+                kwargs={"window_info": window_info}
+            )
+        thread.start()
+        with self._lock:
+            self._active_threads.append(thread)
+            self._active_threads = [t for t in self._active_threads if t.is_alive()]
+
     def wait_for_pending(self, timeout: float = 2.0):
         """等待所有截图线程完成"""
+        # 先触发挂起的单击
+        args = None
+        with self._lock:
+            if self._pending_click_timer:
+                self._pending_click_timer.cancel()
+                args = self._pending_click_args
+                self._pending_click_timer = None
+                self._pending_click_args = None
+        if args:
+            button_name, x, y, window_info = args
+            self._start_capture_thread("click", button_name, x, y,
+                                       window_info=window_info)
         for thread in self._active_threads:
             thread.join(timeout=timeout)
 
@@ -676,7 +724,6 @@ class MouseCapture:
 
                 press_x = self._press_x
                 press_y = self._press_y
-                press_button = self._press_button
 
             # 在点击发生时立即确定被点击的窗口（避免截图线程中延迟查询导致窗口归属错误）
             window_info = self._get_window_at_point(x, y)
@@ -685,14 +732,13 @@ class MouseCapture:
             drag_distance = self._distance(press_x, press_y, x, y)
 
             if drag_distance > self.DRAG_THRESHOLD:
-                # 拖拽 - 使用按下时的坐标确定窗口
+                # 拖拽 - 取消挂起的单击，使用按下时的坐标确定窗口
+                with self._lock:
+                    self._cancel_pending_click()
                 window_info = self._get_window_at_point(press_x, press_y)
-                action = "drag"
-                thread = threading.Thread(
-                    target=self._capture_and_save,
-                    args=(action, button_name, press_x, press_y, x, y),
-                    kwargs={"window_info": window_info}
-                )
+                self._start_capture_thread("drag", button_name,
+                                           press_x, press_y, x, y,
+                                           window_info=window_info)
             else:
                 # 点击 - 检查是否双击
                 with self._lock:
@@ -703,26 +749,30 @@ class MouseCapture:
 
                     if (time_since_last < self.DOUBLE_CLICK_INTERVAL and
                         dist_from_last < self.DOUBLE_CLICK_DISTANCE):
-                        action = "dblclick"
-                        # 重置以避免三击变成两次双击
+                        # 双击 - 取消挂起的单击截图，只拍双击
+                        self._cancel_pending_click()
                         self._last_click_time = 0
+                        is_dblclick = True
                     else:
-                        action = "click"
                         self._last_click_time = now
                         self._last_click_x = x
                         self._last_click_y = y
+                        is_dblclick = False
 
-                thread = threading.Thread(
-                    target=self._capture_and_save,
-                    args=(action, button_name, x, y),
-                    kwargs={"window_info": window_info}
-                )
-
-            thread.start()
-            self._active_threads.append(thread)
-
-            # 清理已完成的线程
-            self._active_threads = [t for t in self._active_threads if t.is_alive()]
+                if is_dblclick:
+                    self._start_capture_thread("dblclick", button_name, x, y,
+                                               window_info=window_info)
+                else:
+                    # 单击 - 延迟触发，等待可能的双击
+                    with self._lock:
+                        self._cancel_pending_click()
+                        self._pending_click_args = (button_name, x, y, window_info)
+                        delay_s = self.DOUBLE_CLICK_INTERVAL / 1000.0
+                        self._pending_click_timer = threading.Timer(
+                            delay_s, self._fire_pending_click
+                        )
+                        self._pending_click_timer.daemon = True
+                        self._pending_click_timer.start()
 
 
 class AutoCapture:
@@ -751,8 +801,8 @@ class AutoCapture:
                     key_logger=self.key_logger,
                     sample_rate=cfg.get("mic_sample_rate", 16000),
                     channels=cfg.get("mic_channels", 1),
-                    start_debounce_ms=cfg.get("mic_start_debounce_ms", 500),
-                    stop_debounce_ms=cfg.get("mic_stop_debounce_ms", 2000),
+                    min_duration_ms=cfg.get("mic_min_duration_ms", cfg.get("mic_start_debounce_ms", 500)),
+                    stop_debounce_ms=cfg.get("mic_stop_debounce_ms", 300),
                 )
             except ImportError as e:
                 print(f"[AutoCapture] Mic capture unavailable (missing dependency): {e}")
@@ -816,8 +866,80 @@ class AutoCapture:
 
         print("[AutoCapture] Stopped.")
 
+    @staticmethod
+    def _check_accessibility(prompt=False):
+        """Check macOS Accessibility permission.
+
+        Args:
+            prompt: If True, trigger macOS native permission dialog.
+        Returns True if granted.
+        """
+        import sys
+        if sys.platform != 'darwin':
+            return True
+        try:
+            import ctypes
+            lib = ctypes.cdll.LoadLibrary(
+                '/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices'
+            )
+            if prompt:
+                # AXIsProcessTrustedWithOptions triggers the macOS permission dialog
+                cf = ctypes.cdll.LoadLibrary(
+                    '/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation'
+                )
+                kAXTrustedCheckOptionPrompt = ctypes.c_void_p.in_dll(
+                    lib, 'kAXTrustedCheckOptionPrompt'
+                )
+                kCFBooleanTrue = ctypes.c_void_p.in_dll(cf, 'kCFBooleanTrue')
+
+                cf.CFDictionaryCreate.restype = ctypes.c_void_p
+                cf.CFDictionaryCreate.argtypes = [
+                    ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
+                    ctypes.POINTER(ctypes.c_void_p), ctypes.c_long,
+                    ctypes.c_void_p, ctypes.c_void_p,
+                ]
+                keys = (ctypes.c_void_p * 1)(kAXTrustedCheckOptionPrompt)
+                values = (ctypes.c_void_p * 1)(kCFBooleanTrue)
+                options = cf.CFDictionaryCreate(None, keys, values, 1, None, None)
+
+                lib.AXIsProcessTrustedWithOptions.restype = ctypes.c_bool
+                lib.AXIsProcessTrustedWithOptions.argtypes = [ctypes.c_void_p]
+                result = lib.AXIsProcessTrustedWithOptions(options)
+                cf.CFRelease.argtypes = [ctypes.c_void_p]
+                cf.CFRelease(options)
+                return result
+            else:
+                lib.AXIsProcessTrusted.restype = ctypes.c_bool
+                return lib.AXIsProcessTrusted()
+        except Exception:
+            return True  # Can't check, assume OK
+
     def run(self):
         """运行（阻塞）"""
+        if not self._check_accessibility(prompt=False):
+            import sys
+            print("[AutoCapture] Requesting Accessibility permission...")
+            self._check_accessibility(prompt=True)
+            print("[AutoCapture] Grant access to OpenCapture in System Settings → Accessibility")
+
+            # Interactive: 5 min wait; background service: 2 min wait
+            max_wait = 100 if sys.stdout.isatty() else 40
+            print("[AutoCapture] Waiting for permission...")
+
+            granted = False
+            for i in range(max_wait):
+                time.sleep(3)
+                if self._check_accessibility(prompt=False):
+                    granted = True
+                    break
+                if i % 10 == 9:
+                    print("[AutoCapture] Still waiting for permission...")
+
+            if not granted:
+                print("[AutoCapture] Permission not granted.")
+                sys.exit(1)
+            print("[AutoCapture] Accessibility permission granted!")
+
         self.start()
 
         try:

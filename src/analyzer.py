@@ -49,6 +49,10 @@ class Analyzer:
             self.llm_router
         )
 
+    async def close(self):
+        """Close all underlying LLM client sessions"""
+        await self.llm_router.close()
+
     async def health_check(self) -> Dict[str, bool]:
         """Check health status of all LLM providers"""
         return await self.llm_router.health_check_all()

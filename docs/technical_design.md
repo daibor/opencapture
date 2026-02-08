@@ -128,7 +128,7 @@ prompts:
 ### Configuration Priority
 
 1. Environment variables (highest priority)
-2. User config file (`~/.opencapture/config.yaml` or `./config/config.yaml`)
+2. User config file (`~/.opencapture/config.yaml`)
 3. Default configuration
 
 ### Environment Variable Mapping

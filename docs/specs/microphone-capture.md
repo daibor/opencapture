@@ -185,4 +185,3 @@ A typical day with voice dictation, a FaceTime call, and a Zoom meeting — inte
 
 - Microphone capture is **disabled by default** and must be explicitly enabled by the user
 - All audio data is stored locally — no audio is transmitted to external services
-- The `privacy.exclude_windows` rules from the global privacy configuration apply: if the microphone-owning application's name or bundle ID matches an exclusion pattern, that recording segment is skipped

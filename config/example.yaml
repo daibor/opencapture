@@ -16,8 +16,8 @@ capture:
   mic_enabled: false                  # Enable microphone recording
   mic_sample_rate: 16000              # Sample rate in Hz (16kHz for speech)
   mic_channels: 1                     # Mono recording
-  mic_start_debounce_ms: 500          # Wait before starting recording (ms)
-  mic_stop_debounce_ms: 2000          # Wait before stopping recording (ms)
+  mic_min_duration_ms: 500            # Discard recordings shorter than this (ms)
+  mic_stop_debounce_ms: 300           # Wait before stopping recording (ms)
 
 # ============================================================
 # LLM Configuration
@@ -197,20 +197,6 @@ privacy:
                                       # Must be set to true before using cloud-based analysis
                                       # WARNING: Screenshots and keyboard logs will be sent to remote servers
                                       # Or set env var: OPENCAPTURE_ALLOW_ONLINE=true
-  enabled: false                      # Enable privacy protection
-
-  # Excluded windows (regex patterns)
-  exclude_windows:
-    - ".*[Pp]assword.*"
-    - ".*[Bb]anking.*"
-    - ".*1Password.*"
-    - ".*Keychain.*"
-
-  # Sensitive information filters (regex patterns)
-  sensitive_patterns:
-    - "password|passwd|pwd"
-    - "\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}[\\s-]?\\d{4}"  # Credit card
-    - "\\d{3}-\\d{2}-\\d{4}"                            # SSN
 
 # ============================================================
 # Logging Configuration

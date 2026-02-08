@@ -6,7 +6,6 @@ Supports multiple LLM providers and flexible configuration options
 
 import os
 import json
-import re
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -127,15 +126,7 @@ class Config:
 
         # Privacy configuration
         "privacy": {
-            "enabled": False,
             "allow_online": False,  # Must be explicitly enabled to use remote LLM providers
-            "exclude_windows": [
-                ".*[Pp]assword.*",
-                ".*[Bb]anking.*",
-            ],
-            "sensitive_patterns": [
-                r"password|passwd|pwd",
-            ],
         },
 
         # Logging configuration
@@ -195,18 +186,9 @@ class Config:
 
     def _auto_load_config(self):
         """Auto-discover and load configuration file"""
-        search_paths = [
-            Path.home() / ".opencapture" / "config.yaml",
-            Path.cwd() / "config" / "config.yaml",
-            Path.cwd() / "config" / "config.yml",
-            Path.cwd() / "config.yaml",
-            Path.home() / ".config" / "opencapture" / "config.yaml",
-        ]
-
-        for path in search_paths:
-            if path.exists():
-                self.load_from_file(str(path))
-                break
+        config_path = Path.home() / ".opencapture" / "config.yaml"
+        if config_path.exists():
+            self.load_from_file(str(config_path))
 
     def load_from_file(self, config_path: str):
         """Load configuration from file"""
@@ -371,17 +353,6 @@ class Config:
     def get_system_prompt(self, prompt_type: str = "image") -> str:
         """Get system prompt"""
         return self.get(f"prompts.{prompt_type}.system", "")
-
-    def should_exclude_window(self, window_title: str) -> bool:
-        """Check if window should be excluded (privacy)"""
-        if not self.get("privacy.enabled", False):
-            return False
-
-        patterns = self.get("privacy.exclude_windows", [])
-        for pattern in patterns:
-            if re.search(pattern, window_title, re.IGNORECASE):
-                return True
-        return False
 
     def get_output_dir(self) -> Path:
         """Get output directory"""

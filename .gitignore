@@ -41,11 +41,6 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
-# Capture data (don't commit user data)
-captures/
-~/opencapture/
-opencapture/
-
 # Config files with user settings
 config/*.yaml
 config/*.yml

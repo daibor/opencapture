@@ -68,6 +68,33 @@ jobs:
           name: OpenCapture-macOS-x86_64
           path: OpenCapture-macOS-x86_64.zip
 
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller packaging/windows.spec
+
+      - name: Create archive
+        run: Compress-Archive -Path dist/OpenCapture -DestinationPath OpenCapture-Windows-x86_64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenCapture-Windows-x86_64
+          path: OpenCapture-Windows-x86_64.zip
+
   publish-pypi:
     runs-on: ubuntu-latest
     steps:
@@ -91,7 +118,7 @@ jobs:
         run: twine upload dist/*
 
   create-release:
-    needs: [build-macos-arm, build-macos-intel, publish-pypi]
+    needs: [build-macos-arm, build-macos-intel, build-windows, publish-pypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -105,3 +132,4 @@ jobs:
           files: |
             artifacts/OpenCapture-macOS-arm64/OpenCapture-macOS-arm64.zip
             artifacts/OpenCapture-macOS-x86_64/OpenCapture-macOS-x86_64.zip
+            artifacts/OpenCapture-Windows-x86_64/OpenCapture-Windows-x86_64.zip

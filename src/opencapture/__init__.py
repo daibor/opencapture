@@ -9,7 +9,7 @@ Modules:
 - analyzer: Unified analyzer
 """
 
-__version__ = "0.2.0"
+__version__ = "0.0.0"
 __author__ = "OpenCapture"
 
 from .config import Config, get_config, init_config

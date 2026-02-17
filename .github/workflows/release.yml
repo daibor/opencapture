@@ -13,6 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set version from tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          sed -i '' "s/version = \"0.0.0\"/version = \"$VERSION\"/" pyproject.toml
+          sed -i '' "s/__version__ = \"0.0.0\"/__version__ = \"$VERSION\"/" src/opencapture/__init__.py
+          sed -i '' "s/\"CFBundleVersion\": \"0.0.0\"/\"CFBundleVersion\": \"$VERSION\"/" packaging/macos.spec
+          sed -i '' "s/\"CFBundleShortVersionString\": \"0.0.0\"/\"CFBundleShortVersionString\": \"$VERSION\"/" packaging/macos.spec
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -27,11 +35,76 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller packaging/macos.spec
 
-      - name: Ad-hoc sign
+      - name: Check signing secrets
+        id: check-signing
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          if [ -n "$MACOS_CERTIFICATE" ]; then
+            echo "has_certificate=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import signing certificate
+        if: steps.check-signing.outputs.has_certificate == 'true'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+        run: |
+          CERT_FILE=$(mktemp /tmp/certificate.XXXXXX.p12)
+          echo "$MACOS_CERTIFICATE" | base64 --decode > "$CERT_FILE"
+
+          KEYCHAIN_PATH=$(mktemp /tmp/build.XXXXXX.keychain-db)
+          KEYCHAIN_PWD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+          security import "$CERT_FILE" -P "$MACOS_CERTIFICATE_PWD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          rm -f "$CERT_FILE"
+
+      - name: Sign with Developer ID
+        if: steps.check-signing.outputs.has_certificate == 'true'
+        run: |
+          codesign --force --deep --sign "Developer ID Application" \
+            --options runtime \
+            --timestamp \
+            dist/OpenCapture.app
+
+      - name: Ad-hoc sign (fallback)
+        if: steps.check-signing.outputs.has_certificate != 'true'
         run: codesign --force --deep --sign - dist/OpenCapture.app
 
       - name: Create archive
         run: cd dist && zip -r ../OpenCapture-macOS-arm64.zip OpenCapture.app
+
+      - name: Notarize
+        if: steps.check-signing.outputs.has_certificate == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit OpenCapture-macOS-arm64.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+      - name: Staple notarization ticket
+        if: steps.check-signing.outputs.has_certificate == 'true'
+        run: |
+          xcrun stapler staple dist/OpenCapture.app
+          # Re-zip with stapled ticket
+          rm -f OpenCapture-macOS-arm64.zip
+          cd dist && zip -r ../OpenCapture-macOS-arm64.zip OpenCapture.app
+
+      - name: Cleanup keychain
+        if: always() && env.KEYCHAIN_PATH != ''
+        run: security delete-keychain "$KEYCHAIN_PATH"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -42,6 +115,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set version from tag
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          sed -i "s/version = \"0.0.0\"/version = \"$VERSION\"/" pyproject.toml
+          sed -i "s/__version__ = \"0.0.0\"/__version__ = \"$VERSION\"/" src/opencapture/__init__.py
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -71,6 +151,12 @@ jobs:
     if: ${{ vars.ENABLE_PYPI == 'true' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          sed -i "s/version = \"0.0.0\"/version = \"$VERSION\"/" pyproject.toml
+          sed -i "s/__version__ = \"0.0.0\"/__version__ = \"$VERSION\"/" src/opencapture/__init__.py
 
       - name: Set up Python
         uses: actions/setup-python@v5

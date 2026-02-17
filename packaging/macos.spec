@@ -9,11 +9,9 @@ Build:
 Output:
     dist/OpenCapture.app
 
-After build, ad-hoc sign:
+Signing is handled by the release workflow (Developer ID + notarization).
+For local testing, ad-hoc sign:
     codesign --force --deep --sign - dist/OpenCapture.app
-
-First launch on unsigned builds:
-    Right-click → Open, or: xattr -cr dist/OpenCapture.app
 """
 
 import os
@@ -92,8 +90,13 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "OpenCapture",
         "CFBundleDisplayName": "OpenCapture",
-        "CFBundleVersion": "0.2.0",
-        "CFBundleShortVersionString": "0.2.0",
+        "CFBundleVersion": "0.0.0",
+        "CFBundleShortVersionString": "0.0.0",
         "LSUIElement": True,  # No Dock icon
+        # Usage descriptions required for hardened runtime
+        "NSAppleEventsUsageDescription": "OpenCapture uses Apple Events for system integration.",
+        "NSMicrophoneUsageDescription": "OpenCapture records microphone audio when enabled.",
+        "NSScreenCaptureUsageDescription": "OpenCapture captures screenshots of user activity.",
+        "NSAccessibilityUsageDescription": "OpenCapture monitors keyboard and mouse input.",
     },
 )

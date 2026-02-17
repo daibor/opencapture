@@ -53,7 +53,7 @@ jobs:
           CERT_FILE=$(mktemp /tmp/certificate.XXXXXX.p12)
           echo "$MACOS_CERTIFICATE" | base64 --decode > "$CERT_FILE"
 
-          KEYCHAIN_PATH=$(mktemp /tmp/build.XXXXXX.keychain-db)
+          KEYCHAIN_PATH=$(mktemp -u /tmp/build.XXXXXX.keychain-db)
           KEYCHAIN_PWD=$(openssl rand -base64 32)
 
           security create-keychain -p "$KEYCHAIN_PWD" "$KEYCHAIN_PATH"

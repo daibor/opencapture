@@ -89,7 +89,7 @@ jobs:
         run: codesign --force --deep --sign - dist/OpenCapture.app
 
       - name: Create archive
-        run: cd dist && zip -r ../OpenCapture-macOS-arm64.zip OpenCapture.app
+        run: ditto -c -k --keepParent dist/OpenCapture.app OpenCapture-macOS-arm64.zip
 
       - name: Notarize
         if: steps.check-signing.outputs.has_certificate == 'true'
@@ -125,7 +125,7 @@ jobs:
           done
           # Re-zip with stapled ticket
           rm -f OpenCapture-macOS-arm64.zip
-          cd dist && zip -r ../OpenCapture-macOS-arm64.zip OpenCapture.app
+          ditto -c -k --keepParent dist/OpenCapture.app OpenCapture-macOS-arm64.zip
 
       - name: Cleanup keychain
         if: always() && env.KEYCHAIN_PATH != ''

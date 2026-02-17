@@ -923,7 +923,6 @@ class AutoCapture:
             sys.exit(1)
 
         if not self._check_accessibility(prompt=False):
-            import sys
             print("[AutoCapture] Requesting Accessibility permission...")
             self._check_accessibility(prompt=True)
             print("[AutoCapture] Grant access to OpenCapture in System Settings → Accessibility")

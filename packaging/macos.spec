@@ -17,6 +17,7 @@ For local testing, ad-hoc sign:
 import os
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
@@ -25,14 +26,17 @@ spec_dir = os.path.dirname(os.path.abspath(SPEC))
 project_root = os.path.dirname(spec_dir)
 src_dir = os.path.join(project_root, "src")
 
+# Collect yaml package completely (PyInstaller 6 bundle layout can split it)
+yaml_datas, yaml_binaries, yaml_hiddenimports = collect_all('yaml')
+
 a = Analysis(
     [os.path.join(src_dir, "opencapture", "cli.py")],
     pathex=[src_dir],
-    binaries=[],
+    binaries=yaml_binaries,
     datas=[
         (os.path.join(src_dir, "opencapture", "config", "example.yaml"),
          os.path.join("opencapture", "config")),
-    ],
+    ] + yaml_datas,
     hiddenimports=[
         "opencapture",
         "opencapture.cli",
@@ -44,7 +48,7 @@ a = Analysis(
         "opencapture.report_generator",
         "pynput.keyboard._darwin",
         "pynput.mouse._darwin",
-    ],
+    ] + yaml_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

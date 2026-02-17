@@ -69,18 +69,20 @@ jobs:
       - name: Sign with Developer ID
         if: steps.check-signing.outputs.has_certificate == 'true'
         run: |
-          # Sign all nested binaries first (--deep doesn't propagate --options runtime)
-          find dist/OpenCapture.app -type f \( -name "*.so" -o -name "*.dylib" \) -exec \
-            codesign --force --sign "Developer ID Application" --options runtime --timestamp {} \;
-          # Sign the main executable and app bundle
-          codesign --force --sign "Developer ID Application" \
-            --options runtime \
-            --timestamp \
-            dist/OpenCapture.app/Contents/MacOS/OpenCapture
-          codesign --force --sign "Developer ID Application" \
-            --options runtime \
-            --timestamp \
-            dist/OpenCapture.app
+          IDENTITY="Developer ID Application"
+          APP=dist/OpenCapture.app
+          # Sign ALL Mach-O binaries inside the bundle (not just .so/.dylib)
+          find "$APP" -type f | while read f; do
+            if file "$f" | grep -q "Mach-O"; then
+              codesign --force --sign "$IDENTITY" --options runtime --timestamp "$f"
+            fi
+          done
+          # Sign framework bundles
+          find "$APP" -name "*.framework" -depth | while read fw; do
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$fw"
+          done
+          # Sign the top-level app bundle
+          codesign --force --sign "$IDENTITY" --options runtime --timestamp "$APP"
 
       - name: Ad-hoc sign (fallback)
         if: steps.check-signing.outputs.has_certificate != 'true'

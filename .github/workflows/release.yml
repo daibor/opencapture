@@ -69,7 +69,15 @@ jobs:
       - name: Sign with Developer ID
         if: steps.check-signing.outputs.has_certificate == 'true'
         run: |
-          codesign --force --deep --sign "Developer ID Application" \
+          # Sign all nested binaries first (--deep doesn't propagate --options runtime)
+          find dist/OpenCapture.app -type f \( -name "*.so" -o -name "*.dylib" \) -exec \
+            codesign --force --sign "Developer ID Application" --options runtime --timestamp {} \;
+          # Sign the main executable and app bundle
+          codesign --force --sign "Developer ID Application" \
+            --options runtime \
+            --timestamp \
+            dist/OpenCapture.app/Contents/MacOS/OpenCapture
+          codesign --force --sign "Developer ID Application" \
             --options runtime \
             --timestamp \
             dist/OpenCapture.app
@@ -88,11 +96,22 @@ jobs:
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          xcrun notarytool submit OpenCapture-macOS-arm64.zip \
+          RESULT=$(xcrun notarytool submit OpenCapture-macOS-arm64.zip \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_ID_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
-            --wait
+            --wait 2>&1) || true
+          echo "$RESULT"
+          # Extract submission ID and check status
+          SUB_ID=$(echo "$RESULT" | grep "id:" | head -1 | awk '{print $2}')
+          if echo "$RESULT" | grep -q "status: Invalid"; then
+            echo "::error::Notarization failed. Fetching detailed log..."
+            xcrun notarytool log "$SUB_ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_ID_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID"
+            exit 1
+          fi
 
       - name: Staple notarization ticket
         if: steps.check-signing.outputs.has_certificate == 'true'

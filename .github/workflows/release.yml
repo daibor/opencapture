@@ -97,7 +97,11 @@ jobs:
       - name: Staple notarization ticket
         if: steps.check-signing.outputs.has_certificate == 'true'
         run: |
-          xcrun stapler staple dist/OpenCapture.app
+          for i in 1 2 3; do
+            xcrun stapler staple dist/OpenCapture.app && break
+            echo "Staple attempt $i failed, waiting 15s..."
+            sleep 15
+          done
           # Re-zip with stapled ticket
           rm -f OpenCapture-macOS-arm64.zip
           cd dist && zip -r ../OpenCapture-macOS-arm64.zip OpenCapture.app

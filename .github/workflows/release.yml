@@ -173,7 +173,13 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload dist/*
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          if curl -s --head "https://pypi.org/pypi/opencapture/$VERSION/json" | head -1 | grep -q 200; then
+            echo "Version $VERSION already exists on PyPI, skipping upload."
+          else
+            twine upload dist/*
+          fi
 
   create-release:
     needs: [build-macos-arm, build-windows]

@@ -15,50 +15,43 @@ OpenCapture is a tool for automatically recording user keyboard and mouse behavi
 
 ## System Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         OpenCapture                              │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ KeyLogger    │  │ MouseCapture │  │ WindowTracker│          │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
-│         │                 │                 │                    │
-│         └─────────────────┼─────────────────┘                    │
-│                           ▼                                      │
-│                  ┌────────────────┐                              │
-│                  │  UnifiedLogger │                              │
-│                  └────────┬───────┘                              │
-│                           │                                      │
-│         ┌─────────────────┼─────────────────┐                   │
-│         ▼                 ▼                 ▼                    │
-│  ┌────────────┐   ┌────────────┐   ┌────────────┐              │
-│  │ .log files │   │ .webp imgs │   │ analysis/  │              │
-│  └────────────┘   └────────────┘   └─────┬──────┘              │
-│                                          │                      │
-│                                          ▼                      │
-│                              ┌───────────────────┐              │
-│                              │   LLM Analyzer    │              │
-│                              │                   │              │
-│                              │  ┌─────────────┐  │              │
-│                              │  │ LLM Router  │  │              │
-│                              │  └──────┬──────┘  │              │
-│                              │         │         │              │
-│                              │    ┌────┴────┐    │              │
-│                              │    ▼         ▼    │              │
-│                              │ ┌─────┐ ┌──────┐  │              │
-│                              │ │Local│ │Remote│  │              │
-│                              │ │Ollama│ │ API │  │              │
-│                              │ └─────┘ └──────┘  │              │
-│                              └───────────────────┘              │
-│                                          │                      │
-│                                          ▼                      │
-│                              ┌───────────────────┐              │
-│                              │  Markdown Reports │              │
-│                              │   reports/*.md    │              │
-│                              └───────────────────┘              │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+Three-layer design: Core Components → Engines → Frontends. See `docs/specs/architecture.md` for full specification.
+
+```mermaid
+graph TD
+    subgraph "Layer 2: Frontends"
+        CLI["CLI — cli.py"]
+        GUI["GUI Menu Bar — app.py"]
+        SVC["Service — launchd"]
+    end
+
+    subgraph "Layer 1: Engines — engine.py"
+        CE["CaptureEngine<br/>lifecycle + event dispatch"]
+        AE["AnalysisEngine<br/>async analysis + progress"]
+    end
+
+    subgraph "Layer 0: Core Components"
+        direction TB
+        KL["KeyLogger"] & MC["MouseCapture"] & WT["WindowTracker"] & MIC["MicrophoneCapture"]
+        KL & MC & WT & MIC --> LOG["KeyLogger — unified log writer"]
+        MIC --> WAV[".wav audio"]
+        LOG --> LOGF[".log files"]
+        LOG --> WEBP[".webp images"]
+
+        LOGF & WEBP & WAV --> ANA["Analyzer"]
+        ANA --> LLM["LLM Router"]
+        ANA --> ASR["ASR Client"]
+        LLM --> Ollama & Remote["Remote APIs"]
+        ASR --> Whisper["Whisper API"]
+        ANA --> RPT["ReportGenerator<br/>+ ReportAggregator"]
+        RPT --> MD["Markdown Reports<br/>reports/*.md"]
+    end
+
+    CLI --> CE
+    GUI --> CE & AE
+    SVC --> CLI
+    CE --> KL
+    AE --> ANA
 ```
 
 ---
@@ -222,6 +215,7 @@ class BaseLLMClient(ABC):
 - [ ] Idle detection auto-trigger analysis
 - [ ] Scheduled task scheduling
 - [ ] Weekly/monthly report generation
+- [x] GUI — macOS menu bar app (app.py, engine.py)
 - [ ] Web UI interface
 
 ---
@@ -230,13 +224,15 @@ class BaseLLMClient(ABC):
 
 | File | Description |
 |------|-------------|
-| `src/opencapture/auto_capture.py` | Keyboard/mouse event capture |
-| `src/opencapture/mic_capture.py` | Microphone monitoring (macOS Core Audio) |
+| `src/opencapture/auto_capture.py` | Core capture: KeyLogger, MouseCapture, WindowTracker, AutoCapture |
+| `src/opencapture/mic_capture.py` | Microphone monitoring (macOS Core Audio + sounddevice) |
+| `src/opencapture/engine.py` | Engine layer: CaptureEngine + AnalysisEngine |
+| `src/opencapture/app.py` | GUI frontend: macOS menu bar app + log window |
 | `src/opencapture/llm_client.py` | LLM clients (Ollama/OpenAI/Anthropic) |
 | `src/opencapture/report_generator.py` | Markdown report generation |
 | `src/opencapture/analyzer.py` | Unified analyzer |
 | `src/opencapture/config.py` | Configuration management |
-| `src/opencapture/cli.py` | Unified CLI: capture, analysis, service management |
+| `src/opencapture/cli.py` | Unified CLI: capture, analysis, service management, GUI launch |
 | `src/opencapture/config/example.yaml` | Example configuration |
 | `run.py` | Development entry point |
 | `pyproject.toml` | Package metadata and dependencies |

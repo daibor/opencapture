@@ -174,12 +174,13 @@ class KeyLogger:
         keyboard.Key.f12: 'F12',
     }
 
-    def __init__(self, storage_dir: Path):
+    def __init__(self, storage_dir: Path, on_event=None):
         self.storage_dir = storage_dir
         self.current_line = ""
         self.last_key_time: Optional[float] = None
         self.line_start_time: Optional[datetime] = None
         self._lock = threading.Lock()
+        self._on_event = on_event
 
         # 窗口状态
         self._current_app_name = ""
@@ -230,6 +231,9 @@ class KeyLogger:
             log_file = self._get_log_file()
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(line)
+
+            if self._on_event:
+                self._on_event("keyboard", {"line": self.current_line, "app": self._current_app_name})
 
             self.current_line = ""
             self.line_start_time = None
@@ -328,6 +332,9 @@ class KeyLogger:
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(line)
 
+            if self._on_event:
+                self._on_event("screenshot", {"filename": filename, "action": action, "x": x, "y": y})
+
     def on_window_activated(self, app_name: str, window_title: str, bundle_id: str):
         """窗口激活通知回调 - 更新状态并在应用切换时写入窗口头
 
@@ -348,6 +355,9 @@ class KeyLogger:
             # 确保窗口头（如果是新应用会写入窗口头）
             self._ensure_app_header()
 
+            if self._on_event:
+                self._on_event("window", {"app": app_name, "title": window_title, "bundle_id": bundle_id})
+
     def log_mic_event(self, event_type: str, detail: str, timestamp: str = None):
         """记录麦克风事件到日志
 
@@ -366,6 +376,9 @@ class KeyLogger:
             log_file = self._get_log_file()
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(line)
+
+            if self._on_event:
+                self._on_event("mic", {"event_type": event_type, "detail": detail})
 
     def on_key_press(self, key):
         """按键事件处理"""
@@ -780,7 +793,7 @@ class AutoCapture:
     """主控制器"""
 
     def __init__(self, storage_dir: Optional[str] = None, mic_enabled: bool = False,
-                 mic_config: Optional[dict] = None):
+                 mic_config: Optional[dict] = None, on_event=None):
         if storage_dir:
             self.storage_dir = Path(storage_dir).expanduser()
         else:
@@ -788,7 +801,7 @@ class AutoCapture:
 
         self.storage_dir.mkdir(parents=True, exist_ok=True)
 
-        self.key_logger = KeyLogger(self.storage_dir)
+        self.key_logger = KeyLogger(self.storage_dir, on_event=on_event)
         self.mouse_capture = MouseCapture(self.storage_dir, self.key_logger)
         self.window_tracker = WindowTracker(self.key_logger.on_window_activated)
         self.mic_capture = None

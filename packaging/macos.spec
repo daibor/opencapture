@@ -30,7 +30,7 @@ src_dir = os.path.join(project_root, "src")
 yaml_datas, yaml_binaries, yaml_hiddenimports = collect_all('yaml')
 
 a = Analysis(
-    [os.path.join(src_dir, "opencapture", "cli.py")],
+    [os.path.join(spec_dir, "launch_gui.py")],
     pathex=[src_dir],
     binaries=yaml_binaries,
     datas=[
@@ -40,6 +40,8 @@ a = Analysis(
     hiddenimports=[
         "opencapture",
         "opencapture.cli",
+        "opencapture.app",
+        "opencapture.engine",
         "opencapture.auto_capture",
         "opencapture.mic_capture",
         "opencapture.config",

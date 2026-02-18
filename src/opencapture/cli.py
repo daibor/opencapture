@@ -399,6 +399,9 @@ def main():
               opencapture status              Show running state and today's stats
               opencapture log [-f]            Show/follow service logs
 
+            GUI:
+              opencapture gui                 Launch menu bar app (macOS)
+
             Examples:
               opencapture                     Start capture (foreground)
               opencapture --analyze today     Analyze today's data
@@ -413,7 +416,7 @@ def main():
     parser.add_argument(
         "command",
         nargs="?",
-        choices=["start", "stop", "restart", "status", "log"],
+        choices=["start", "stop", "restart", "status", "log", "gui"],
         default=None,
         help="Service management command",
     )
@@ -468,6 +471,10 @@ def main():
     if args.command == "log":
         follow = "-f" in args.extra_args
         cmd_log(follow=follow)
+        return
+    if args.command == "gui":
+        from opencapture.app import main as gui_main
+        gui_main()
         return
 
     # Permission check mode

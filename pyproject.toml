@@ -25,6 +25,9 @@ dependencies = [
 [project.scripts]
 opencapture = "opencapture.cli:main"
 
+[project.gui-scripts]
+opencapture-gui = "opencapture.app:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

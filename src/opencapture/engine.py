@@ -188,23 +188,29 @@ class AnalysisEngine:
 
         asyncio.run_coroutine_threadsafe(_wrapper(), self._loop)
 
-    def analyze_today(self, provider=None, callback=None):
+    def analyze_today(self, provider=None, callback=None, timeout=120):
         """Submit analyze_day task to background loop.
 
         Args:
             provider: LLM provider name (or None for default).
             callback: Called with results dict when complete.
+            timeout: Max seconds before giving up (default 120).
         """
         async def _run():
             from .analyzer import Analyzer
             analyzer = Analyzer(self._config)
             try:
                 date_str = datetime.now().strftime("%Y-%m-%d")
-                return await analyzer.analyze_day(
-                    date_str,
-                    generate_reports=True,
-                    provider=provider,
+                return await asyncio.wait_for(
+                    analyzer.analyze_day(
+                        date_str,
+                        generate_reports=True,
+                        provider=provider,
+                    ),
+                    timeout=timeout,
                 )
+            except asyncio.TimeoutError:
+                return {"error": f"Analysis timed out after {timeout}s. Is your LLM provider running?"}
             finally:
                 await analyzer.close()
 

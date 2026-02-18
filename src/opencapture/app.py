@@ -340,25 +340,42 @@ else:
             self._statusLineItem.setTitle_("Analyzing...")
 
             def on_result(result):
-                # Dispatch to main thread
+                # Normalize to a plain string for safe ObjC bridging.
+                # Python dicts may not bridge cleanly through
+                # performSelectorOnMainThread.
+                try:
+                    if isinstance(result, dict) and "error" in result:
+                        msg = f"Error: {result['error']}"
+                    elif isinstance(result, dict):
+                        images = result.get("images_analyzed", 0)
+                        audios = result.get("audios_transcribed", 0)
+                        logs = result.get("logs_analyzed", 0)
+                        msg = f"Done: {images} images, {audios} audios, {logs} logs analyzed"
+                    else:
+                        msg = str(result)
+                except Exception as e:
+                    msg = f"Error: {e}"
+                # Pass a plain NSString to the main thread
                 self.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "handleAnalysisResult:", result, False
+                    "handleAnalysisResult:", msg, False
                 )
 
             provider = self.config.get_default_provider()
             self.analysisEngine.analyze_today(provider=provider, callback=on_result)
 
         @objc.typedSelector(b"v@:@")
-        def handleAnalysisResult_(self, result):
+        def handleAnalysisResult_(self, message):
             self._analyzeItem.setEnabled_(True)
-            if isinstance(result, dict) and "error" in result:
-                self._statusLineItem.setTitle_(f"Analysis error: {result['error']}")
+            self._statusLineItem.setTitle_(str(message))
+            # Show alert so user sees result even if menu is closed
+            alert = AppKit.NSAlert.alloc().init()
+            if str(message).startswith("Error"):
+                alert.setMessageText_("Analysis Failed")
             else:
-                images = result.get("images_analyzed", 0) if isinstance(result, dict) else 0
-                audios = result.get("audios_transcribed", 0) if isinstance(result, dict) else 0
-                self._statusLineItem.setTitle_(
-                    f"Analysis done: {images} images, {audios} audios"
-                )
+                alert.setMessageText_("Analysis Complete")
+            alert.setInformativeText_(str(message))
+            alert.addButtonWithTitle_("OK")
+            alert.runModal()
 
         @objc.typedSelector(b"v@:@")
         def quitApp_(self, sender):

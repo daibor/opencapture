@@ -17,9 +17,10 @@ from .config import Config
 class CaptureEngine:
     """Manages capture lifecycle and dispatches events to subscribers.
 
-    Does NOT own the NSRunLoop — the frontend is responsible for that.
-    Events fire from capture threads; frontends must dispatch to their
-    own main thread if needed.
+    On macOS, the frontend must pump the NSRunLoop on the main thread
+    (e.g. via NSApplication.run()). On Windows/Linux, no special
+    event loop is needed. Events fire from capture threads; frontends
+    must dispatch to their own main thread if needed.
     """
 
     def __init__(self, config: Config):
@@ -50,8 +51,9 @@ class CaptureEngine:
     def start(self):
         """Create AutoCapture with on_event wiring and start listeners.
 
-        The caller must be pumping the NSRunLoop on the main thread
-        (e.g. via NSApplication.run() or manual NSRunLoop.runUntilDate_).
+        On macOS, the caller must be pumping the NSRunLoop on the main
+        thread (e.g. via NSApplication.run()). On other platforms, no
+        special event loop is needed.
 
         Returns error message string on failure, None on success.
         """
@@ -123,7 +125,10 @@ class CaptureEngine:
 
     @staticmethod
     def check_accessibility(prompt=False) -> bool:
-        """Check macOS Accessibility permission.
+        """Check platform accessibility permission.
+
+        On macOS: checks Accessibility permission via AXIsProcessTrusted.
+        On other platforms: always returns True.
 
         Args:
             prompt: If True, trigger macOS native permission dialog.

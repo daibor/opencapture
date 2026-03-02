@@ -18,7 +18,9 @@ from pathlib import Path
 from typing import Optional
 
 
-# ── Service management (macOS launchd) ──────────────────────
+# ── Service management ─────────────────────────────────────
+# macOS: launchd (LaunchAgent plist)
+# Windows: background subprocess with PID file
 
 PLIST_LABEL = "com.opencapture.agent"
 
@@ -33,7 +35,14 @@ def _log_dir() -> Path:
     return d
 
 
-def _get_service_pid() -> Optional[str]:
+def _pid_file() -> Path:
+    """PID file for Windows background process."""
+    return Path.home() / ".opencapture" / "opencapture.pid"
+
+
+# ── macOS launchd helpers ──────────────────────────────────
+
+def _get_service_pid_macos() -> Optional[str]:
     """Return PID string if the service is loaded, else None."""
     try:
         result = subprocess.run(
@@ -49,8 +58,8 @@ def _get_service_pid() -> Optional[str]:
     return None
 
 
-def _is_service_running() -> bool:
-    pid = _get_service_pid()
+def _is_service_running_macos() -> bool:
+    pid = _get_service_pid_macos()
     return pid is not None and pid != "-"
 
 
@@ -61,7 +70,6 @@ def _write_plist():
     log_dir = _log_dir()
 
     python_exe = sys.executable
-    # Use -m opencapture so it works whether installed via pip or run from source
     plist_content = f"""\
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -96,18 +104,63 @@ def _write_plist():
     plist_path.write_text(plist_content)
 
 
+# ── Windows background process helpers ─────────────────────
+
+def _get_service_pid_windows() -> Optional[int]:
+    """Return PID if the background process is running, else None."""
+    pid_file = _pid_file()
+    if not pid_file.exists():
+        return None
+    try:
+        pid = int(pid_file.read_text().strip())
+        # Check if process is alive
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if handle:
+            kernel32.CloseHandle(handle)
+            return pid
+        # Process not found, clean up stale PID file
+        pid_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+    return None
+
+
+def _is_service_running_windows() -> bool:
+    return _get_service_pid_windows() is not None
+
+
+# ── Cross-platform service commands ───────────────────────
+
 def cmd_start():
-    """Start capture as a background service (macOS launchd)."""
-    if sys.platform != "darwin":
-        print("Background service is currently macOS-only.")
+    """Start capture as a background service."""
+    from opencapture.onboarding import is_first_run, mark_setup_complete
+
+    if is_first_run():
+        print()
+        print("  OpenCapture")
+        print("  Context capture for proactive AI agents.")
+        print()
+        print("  All data is stored locally in ~/opencapture/")
+        print("  AI analysis uses local Ollama by default.")
+        print()
+        mark_setup_complete()
+
+    if sys.platform == "darwin":
+        _cmd_start_macos()
+    elif sys.platform == "win32":
+        _cmd_start_windows()
+    else:
+        print("Background service is not supported on this platform.")
         print("Run in foreground instead: opencapture")
+
+
+def _cmd_start_macos():
+    if _is_service_running_macos():
+        print(f"  OpenCapture is already running (PID {_get_service_pid_macos()})")
         return
 
-    if _is_service_running():
-        print(f"  OpenCapture is already running (PID {_get_service_pid()})")
-        return
-
-    # Clear old logs
     log_dir = _log_dir()
     for name in ("output.log", "error.log"):
         log_file = log_dir / name
@@ -121,8 +174,8 @@ def cmd_start():
     import time
     time.sleep(2)
 
-    if _is_service_running():
-        print(f"  OpenCapture started (PID {_get_service_pid()})")
+    if _is_service_running_macos():
+        print(f"  OpenCapture started (PID {_get_service_pid_macos()})")
         print("  Auto-start on login: enabled")
         print()
         print("  If this is the first run, grant OpenCapture access in:")
@@ -132,20 +185,85 @@ def cmd_start():
         print("  Check logs: opencapture log")
 
 
-def cmd_stop():
-    """Stop the background service."""
-    if sys.platform != "darwin":
-        print("Background service is currently macOS-only.")
+def _cmd_start_windows():
+    if _is_service_running_windows():
+        pid = _get_service_pid_windows()
+        print(f"  OpenCapture is already running (PID {pid})")
         return
 
+    log_dir = _log_dir()
+    for name in ("output.log", "error.log"):
+        log_file = log_dir / name
+        if log_file.exists():
+            log_file.write_text("")
+
+    python_exe = sys.executable
+    out_log = log_dir / "output.log"
+    err_log = log_dir / "error.log"
+
+    # Launch as a detached background process
+    import os
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    DETACHED_PROCESS = 0x00000008
+
+    with open(out_log, "w") as stdout_f, open(err_log, "w") as stderr_f:
+        proc = subprocess.Popen(
+            [python_exe, "-m", "opencapture"],
+            stdout=stdout_f,
+            stderr=stderr_f,
+            creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+
+    # Save PID
+    pid_file = _pid_file()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(proc.pid))
+
+    print(f"  OpenCapture started (PID {proc.pid})")
+    print(f"  Logs: {log_dir}")
+
+
+def cmd_stop():
+    """Stop the background service."""
+    if sys.platform == "darwin":
+        _cmd_stop_macos()
+    elif sys.platform == "win32":
+        _cmd_stop_windows()
+    else:
+        print("Background service is not supported on this platform.")
+
+
+def _cmd_stop_macos():
     plist = _plist_path()
     if not plist.exists():
         print("  OpenCapture is not running")
         return
-
     subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
     print("  OpenCapture stopped")
     print("  Auto-start on login: disabled")
+
+
+def _cmd_stop_windows():
+    pid = _get_service_pid_windows()
+    if pid is None:
+        print("  OpenCapture is not running")
+        return
+
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x0001, False, pid)  # PROCESS_TERMINATE
+        if handle:
+            kernel32.TerminateProcess(handle, 0)
+            kernel32.CloseHandle(handle)
+    except Exception as e:
+        print(f"  Failed to stop process: {e}")
+        return
+
+    pid_file = _pid_file()
+    pid_file.unlink(missing_ok=True)
+    print("  OpenCapture stopped")
 
 
 def cmd_restart():
@@ -158,27 +276,32 @@ def cmd_restart():
 
 def cmd_status():
     """Show service status and today's stats."""
-    if sys.platform != "darwin":
-        print("Background service is currently macOS-only.")
-        return
-
     print()
     print("  OpenCapture")
     print()
 
-    pid = _get_service_pid()
-    if pid and pid != "-":
-        print(f"  State:      Running (PID {pid})")
-    elif pid:
-        print("  State:      Loaded but not running")
-    else:
-        print("  State:      Stopped")
+    if sys.platform == "darwin":
+        pid = _get_service_pid_macos()
+        if pid and pid != "-":
+            print(f"  State:      Running (PID {pid})")
+        elif pid:
+            print("  State:      Loaded but not running")
+        else:
+            print("  State:      Stopped")
 
-    plist = _plist_path()
-    if plist.exists() and _get_service_pid() is not None:
-        print("  Auto-start: Enabled")
+        plist = _plist_path()
+        if plist.exists() and _get_service_pid_macos() is not None:
+            print("  Auto-start: Enabled")
+        else:
+            print("  Auto-start: Disabled")
+    elif sys.platform == "win32":
+        pid = _get_service_pid_windows()
+        if pid:
+            print(f"  State:      Running (PID {pid})")
+        else:
+            print("  State:      Stopped")
     else:
-        print("  Auto-start: Disabled")
+        print("  State:      Unknown (unsupported platform)")
 
     data_dir = Path.home() / "opencapture"
     print(f"  Data:       {data_dir}")
@@ -207,15 +330,31 @@ def cmd_log(follow: bool = False):
         return
 
     if follow:
-        args = ["tail", "-f"]
-        if out_log.exists():
-            args.append(str(out_log))
-        if err_log.exists():
-            args.append(str(err_log))
-        try:
-            subprocess.run(args)
-        except KeyboardInterrupt:
-            pass
+        if sys.platform == "win32":
+            # Windows: use PowerShell Get-Content -Wait
+            log_files = []
+            if out_log.exists():
+                log_files.append(str(out_log))
+            if err_log.exists():
+                log_files.append(str(err_log))
+            if log_files:
+                try:
+                    subprocess.run(
+                        ["powershell", "-Command",
+                         f"Get-Content -Path '{log_files[0]}' -Wait -Tail 30"],
+                    )
+                except KeyboardInterrupt:
+                    pass
+        else:
+            args = ["tail", "-f"]
+            if out_log.exists():
+                args.append(str(out_log))
+            if err_log.exists():
+                args.append(str(err_log))
+            try:
+                subprocess.run(args)
+            except KeyboardInterrupt:
+                pass
     else:
         if out_log.exists():
             print("  -- Recent output --")
@@ -242,6 +381,11 @@ def run_capture(args):
     """Run capture mode."""
     from opencapture.auto_capture import AutoCapture
     from opencapture.config import init_config
+    from opencapture.onboarding import cli_onboarding, show_first_session_tip
+
+    # First-run onboarding
+    if not cli_onboarding():
+        return
 
     config = init_config(args.config if hasattr(args, "config") else None)
     if args.dir:
@@ -254,12 +398,21 @@ def run_capture(args):
         mic_config=capture_config,
     )
 
-    # Handle SIGTERM for clean shutdown (e.g. launchctl stop)
+    # Handle SIGTERM for clean shutdown (e.g. launchctl stop / Windows terminate)
     def handle_term(signum, frame):
         capture._running = False
 
     signal.signal(signal.SIGTERM, handle_term)
+    if sys.platform == "win32":
+        # On Windows, also handle SIGBREAK (Ctrl+Break / process group signal)
+        try:
+            signal.signal(signal.SIGBREAK, handle_term)
+        except (AttributeError, OSError):
+            pass
     capture.run()
+
+    # Post-session tip
+    show_first_session_tip()
 
 
 # ── Analysis mode ─────────────────────────────────────────
@@ -392,15 +545,16 @@ def main():
         description="OpenCapture - Keyboard/Mouse Recording & AI Analysis",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
-            Service commands:
-              opencapture start               Start as background service (macOS)
+            Service commands (macOS + Windows):
+              opencapture start               Start as background service
               opencapture stop                Stop service
               opencapture restart             Restart service
               opencapture status              Show running state and today's stats
               opencapture log [-f]            Show/follow service logs
 
             GUI:
-              opencapture gui                 Launch menu bar app (macOS)
+              opencapture gui                 Launch GUI (native macOS / tray on Windows)
+              opencapture gui --tray          Force cross-platform tray GUI
 
             Examples:
               opencapture                     Start capture (foreground)
@@ -473,8 +627,13 @@ def main():
         cmd_log(follow=follow)
         return
     if args.command == "gui":
-        from opencapture.app import main as gui_main
-        gui_main()
+        use_tray = "--tray" in args.extra_args
+        if use_tray or sys.platform != "darwin":
+            from opencapture.app_tray import main as tray_main
+            tray_main()
+        else:
+            from opencapture.app import main as gui_main
+            gui_main()
         return
 
     # Permission check mode

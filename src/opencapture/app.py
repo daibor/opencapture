@@ -14,8 +14,9 @@ import sys
 
 if sys.platform != "darwin":
     def main():
-        print("OpenCapture GUI is macOS-only.")
-        sys.exit(1)
+        """On non-macOS, launch the cross-platform tray GUI."""
+        from .app_tray import main as tray_main
+        tray_main()
 else:
     import objc
     import AppKit
@@ -215,6 +216,16 @@ else:
             self._setupMenuBar()
             self.analysisEngine.start()
 
+            # First-run welcome
+            from .onboarding import is_first_run, mark_setup_complete, get_gui_welcome
+            if is_first_run():
+                alert = AppKit.NSAlert.alloc().init()
+                alert.setMessageText_("Welcome to OpenCapture")
+                alert.setInformativeText_(get_gui_welcome())
+                alert.addButtonWithTitle_("Get Started")
+                alert.runModal()
+                mark_setup_complete()
+
             # Periodic status update
             self._statusTimer = Foundation.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 5.0, self, "updateStatusLine:", None, True
@@ -298,12 +309,11 @@ else:
                 if not CaptureEngine.check_accessibility(prompt=False):
                     # Trigger system permission dialog
                     CaptureEngine.check_accessibility(prompt=True)
+                    from .onboarding import get_permission_message
+                    title, body = get_permission_message("accessibility")
                     alert = AppKit.NSAlert.alloc().init()
-                    alert.setMessageText_("Accessibility Permission Required")
-                    alert.setInformativeText_(
-                        "Grant OpenCapture access in System Settings > "
-                        "Privacy & Security > Accessibility, then click OK."
-                    )
+                    alert.setMessageText_(title)
+                    alert.setInformativeText_(body + "\n\nClick OK after granting access.")
                     alert.addButtonWithTitle_("OK")
                     alert.runModal()
                     # Re-check after user dismissed the alert

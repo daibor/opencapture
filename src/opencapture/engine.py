@@ -133,8 +133,8 @@ class CaptureEngine:
         Args:
             prompt: If True, trigger macOS native permission dialog.
         """
-        from .auto_capture import AutoCapture
-        return AutoCapture._check_accessibility(prompt=prompt)
+        from .platform import get_backend
+        return get_backend().check_accessibility(prompt=prompt)
 
 
 class AnalysisEngine:

@@ -2,11 +2,11 @@
 """
 Auto Capture - Cross-platform keyboard and mouse activity collection tool.
 
-Supports macOS (primary, with native AppKit/Quartz integration) and
-Windows (using Win32 ctypes APIs). Linux has basic fallback support.
+Platform-specific logic (window info, accessibility, event loops) is
+delegated to the `platform` backend package. This module contains only
+business logic: keyboard logging, mouse capture, screenshot composition.
 """
 
-import os
 import sys
 import threading
 import time
@@ -18,265 +18,42 @@ from pynput import keyboard, mouse
 from PIL import Image, ImageDraw
 import mss
 
-# ── Platform-specific imports ──────────────────────────────
-
-_IS_MACOS = sys.platform == "darwin"
-_IS_WINDOWS = sys.platform == "win32"
-
-if _IS_MACOS:
-    import AppKit
-    import Quartz
-
-if _IS_WINDOWS:
-    import ctypes
-    import ctypes.wintypes
-
-    _user32 = ctypes.windll.user32
-    _kernel32 = ctypes.windll.kernel32
-    _psapi = ctypes.windll.psapi
-
-    # Win32 constants
-    _PROCESS_QUERY_INFORMATION = 0x0400
-    _PROCESS_VM_READ = 0x0010
-    _GW_OWNER = 4
-    _GA_ROOTOWNER = 3
-    _DWMWA_CLOAKED = 14
-
-    class _RECT(ctypes.Structure):
-        _fields_ = [
-            ("left", ctypes.c_long),
-            ("top", ctypes.c_long),
-            ("right", ctypes.c_long),
-            ("bottom", ctypes.c_long),
-        ]
-
-
-# ── Platform-specific window helpers ──────────────────────
-
-
-def _get_active_window_info_macos() -> tuple[str, str, str]:
-    """Get (app_name, window_title, bundle_id) on macOS."""
-    try:
-        workspace = AppKit.NSWorkspace.sharedWorkspace()
-        active_app = workspace.frontmostApplication()
-        app_name = active_app.localizedName() or "Unknown"
-        bundle_id = active_app.bundleIdentifier() or "Unknown"
-        pid = active_app.processIdentifier()
-        window_title = _get_window_title_macos(pid)
-        return app_name, window_title, bundle_id
-    except Exception:
-        return "Unknown", "", "Unknown"
-
-
-def _get_window_title_macos(pid: int) -> str:
-    """Get window title via Accessibility API on macOS."""
-    try:
-        app_ref = Quartz.AXUIElementCreateApplication(pid)
-        error, focused_window = Quartz.AXUIElementCopyAttributeValue(
-            app_ref, Quartz.kAXFocusedWindowAttribute, None
-        )
-        if error == 0 and focused_window:
-            error, title = Quartz.AXUIElementCopyAttributeValue(
-                focused_window, Quartz.kAXTitleAttribute, None
-            )
-            if error == 0 and title:
-                return str(title)
-        error, windows = Quartz.AXUIElementCopyAttributeValue(
-            app_ref, Quartz.kAXWindowsAttribute, None
-        )
-        if error == 0 and windows and len(windows) > 0:
-            error, title = Quartz.AXUIElementCopyAttributeValue(
-                windows[0], Quartz.kAXTitleAttribute, None
-            )
-            if error == 0 and title:
-                return str(title)
-        return ""
-    except Exception:
-        return ""
-
-
-def _get_active_window_info_windows() -> tuple[str, str, str]:
-    """Get (app_name, window_title, process_name) on Windows."""
-    try:
-        hwnd = _user32.GetForegroundWindow()
-        if not hwnd:
-            return "Unknown", "", "Unknown"
-
-        # Window title
-        length = _user32.GetWindowTextLengthW(hwnd)
-        buf = ctypes.create_unicode_buffer(length + 1)
-        _user32.GetWindowTextW(hwnd, buf, length + 1)
-        window_title = buf.value
-
-        # Process name via PID
-        pid = ctypes.wintypes.DWORD()
-        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        process_name = _get_process_name_windows(pid.value)
-
-        return process_name, window_title, process_name
-    except Exception:
-        return "Unknown", "", "Unknown"
-
-
-def _get_process_name_windows(pid: int) -> str:
-    """Get process executable name from PID on Windows."""
-    try:
-        handle = _kernel32.OpenProcess(
-            _PROCESS_QUERY_INFORMATION | _PROCESS_VM_READ, False, pid
-        )
-        if not handle:
-            return "Unknown"
-        try:
-            buf = ctypes.create_unicode_buffer(260)
-            _psapi.GetModuleBaseNameW(handle, None, buf, 260)
-            name = buf.value
-            # Strip .exe suffix for cleaner display
-            if name.lower().endswith(".exe"):
-                name = name[:-4]
-            return name or "Unknown"
-        finally:
-            _kernel32.CloseHandle(handle)
-    except Exception:
-        return "Unknown"
-
-
-def _get_window_at_point_windows(x: int, y: int) -> tuple[str, str, str]:
-    """Get window info at screen coordinates on Windows."""
-    try:
-        point = ctypes.wintypes.POINT(x, y)
-        hwnd = _user32.WindowFromPoint(point)
-        if not hwnd:
-            return _get_active_window_info_windows()
-
-        # Walk up to the root owner window
-        root = _user32.GetAncestor(hwnd, _GA_ROOTOWNER)
-        if root:
-            hwnd = root
-
-        # Window title
-        length = _user32.GetWindowTextLengthW(hwnd)
-        buf = ctypes.create_unicode_buffer(length + 1)
-        _user32.GetWindowTextW(hwnd, buf, length + 1)
-        window_title = buf.value
-
-        # Process name
-        pid = ctypes.wintypes.DWORD()
-        _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        process_name = _get_process_name_windows(pid.value)
-
-        return process_name, window_title, process_name
-    except Exception:
-        return _get_active_window_info_windows()
-
-
-def _get_active_window_bounds_windows() -> Optional[tuple[int, int, int, int]]:
-    """Get (x, y, width, height) of the foreground window on Windows."""
-    try:
-        hwnd = _user32.GetForegroundWindow()
-        if not hwnd:
-            return None
-        rect = _RECT()
-        _user32.GetWindowRect(hwnd, ctypes.byref(rect))
-        w = rect.right - rect.left
-        h = rect.bottom - rect.top
-        if w < 100 or h < 100:
-            return None
-        return (rect.left, rect.top, w, h)
-    except Exception:
-        return None
-
-
-def _get_active_window_info_fallback() -> tuple[str, str, str]:
-    """Fallback for unsupported platforms."""
-    return "Unknown", "", "Unknown"
-
-
-# Dispatch helpers based on platform
-def _platform_get_active_window_info() -> tuple[str, str, str]:
-    if _IS_MACOS:
-        return _get_active_window_info_macos()
-    elif _IS_WINDOWS:
-        return _get_active_window_info_windows()
-    return _get_active_window_info_fallback()
+from opencapture.platform import get_backend
 
 
 # ── WindowTracker ─────────────────────────────────────────
 
 
 class WindowTracker:
-    """Track active window changes across platforms."""
+    """Track active window changes via the platform backend."""
 
     def __init__(self, on_window_change):
         self.on_window_change = on_window_change
         self.current_app_name: Optional[str] = None
         self.current_window_title: Optional[str] = None
         self.current_bundle_id: Optional[str] = None
-        self._running = False
-        self._observer = None  # macOS NSNotification observer
-        self._poll_thread = None  # Windows/Linux polling thread
-
-    def _get_active_window_info(self) -> tuple[str, str, str]:
-        return _platform_get_active_window_info()
-
-    def _handle_app_activation(self, notification=None):
-        """Handle app activation (macOS notification or polling result)."""
-        app_name, window_title, bundle_id = self._get_active_window_info()
-        self.current_app_name = app_name
-        self.current_window_title = window_title
-        self.current_bundle_id = bundle_id
-        self.on_window_change(app_name, window_title, bundle_id)
-
-    def _poll_loop(self):
-        """Polling loop for window changes (Windows/Linux)."""
-        while self._running:
-            try:
-                app_name, window_title, bundle_id = self._get_active_window_info()
-                if app_name != self.current_app_name or window_title != self.current_window_title:
-                    self.current_app_name = app_name
-                    self.current_window_title = window_title
-                    self.current_bundle_id = bundle_id
-                    self.on_window_change(app_name, window_title, bundle_id)
-            except Exception:
-                pass
-            time.sleep(0.5)
 
     def start(self):
         """Start window change monitoring."""
-        self._running = True
-
+        backend = get_backend()
         # Get initial window info
-        app_name, window_title, bundle_id = self._get_active_window_info()
+        app_name, window_title, bundle_id = backend.get_active_window_info()
         self.current_app_name = app_name
         self.current_window_title = window_title
         self.current_bundle_id = bundle_id
         self.on_window_change(app_name, window_title, bundle_id)
 
-        if _IS_MACOS:
-            # Use NSWorkspace notification for efficient event-driven tracking
-            nc = AppKit.NSWorkspace.sharedWorkspace().notificationCenter()
-            self._observer = nc.addObserverForName_object_queue_usingBlock_(
-                AppKit.NSWorkspaceDidActivateApplicationNotification,
-                None,
-                AppKit.NSOperationQueue.mainQueue(),
-                self._handle_app_activation,
-            )
-        else:
-            # Use polling on Windows/Linux
-            self._poll_thread = threading.Thread(
-                target=self._poll_loop, daemon=True, name="window-tracker"
-            )
-            self._poll_thread.start()
+        backend.start_window_observer(self._on_window_changed)
+
+    def _on_window_changed(self, app_name: str, window_title: str, bundle_id: str):
+        self.current_app_name = app_name
+        self.current_window_title = window_title
+        self.current_bundle_id = bundle_id
+        self.on_window_change(app_name, window_title, bundle_id)
 
     def stop(self):
         """Stop monitoring."""
-        self._running = False
-        if _IS_MACOS and self._observer:
-            nc = AppKit.NSWorkspace.sharedWorkspace().notificationCenter()
-            nc.removeObserver_(self._observer)
-            self._observer = None
-        if self._poll_thread:
-            self._poll_thread.join(timeout=2.0)
-            self._poll_thread = None
+        get_backend().stop_window_observer()
 
 
 class KeyLogger:
@@ -289,50 +66,6 @@ class KeyLogger:
     _current_window_title: str = ""
     _current_bundle_id: str = ""
 
-    # Special key mapping (macOS keyboard symbols)
-    SPECIAL_KEYS = {
-        keyboard.Key.enter: '\u21a9',
-        keyboard.Key.tab: '\u21e5',
-        keyboard.Key.space: ' ',
-        keyboard.Key.backspace: '\u232b',
-        keyboard.Key.delete: '\u2326',
-        keyboard.Key.esc: '\u238b',
-        keyboard.Key.shift: '\u21e7',
-        keyboard.Key.shift_l: '\u21e7',
-        keyboard.Key.shift_r: '\u21e7',
-        keyboard.Key.ctrl: '\u2303',
-        keyboard.Key.ctrl_l: '\u2303',
-        keyboard.Key.ctrl_r: '\u2303',
-        keyboard.Key.alt: '\u2325',
-        keyboard.Key.alt_l: '\u2325',
-        keyboard.Key.alt_r: '\u2325',
-        keyboard.Key.alt_gr: '\u2325',
-        keyboard.Key.cmd: '\u2318',
-        keyboard.Key.cmd_l: '\u2318',
-        keyboard.Key.cmd_r: '\u2318',
-        keyboard.Key.caps_lock: '\u21ea',
-        keyboard.Key.up: '\u2191',
-        keyboard.Key.down: '\u2193',
-        keyboard.Key.left: '\u2190',
-        keyboard.Key.right: '\u2192',
-        keyboard.Key.home: '\u2196',
-        keyboard.Key.end: '\u2198',
-        keyboard.Key.page_up: '\u21de',
-        keyboard.Key.page_down: '\u21df',
-        keyboard.Key.f1: 'F1',
-        keyboard.Key.f2: 'F2',
-        keyboard.Key.f3: 'F3',
-        keyboard.Key.f4: 'F4',
-        keyboard.Key.f5: 'F5',
-        keyboard.Key.f6: 'F6',
-        keyboard.Key.f7: 'F7',
-        keyboard.Key.f8: 'F8',
-        keyboard.Key.f9: 'F9',
-        keyboard.Key.f10: 'F10',
-        keyboard.Key.f11: 'F11',
-        keyboard.Key.f12: 'F12',
-    }
-
     def __init__(self, storage_dir: Path, on_event=None):
         self.storage_dir = storage_dir
         self.current_line = ""
@@ -340,6 +73,9 @@ class KeyLogger:
         self.line_start_time: Optional[datetime] = None
         self._lock = threading.Lock()
         self._on_event = on_event
+
+        # Key symbols from platform backend
+        self.SPECIAL_KEYS = get_backend().get_key_symbols()
 
         # Window state
         self._current_app_name = ""
@@ -389,15 +125,12 @@ class KeyLogger:
             self.current_line = ""
             self.line_start_time = None
 
-    def _get_active_window_info(self) -> tuple[str, str, str]:
-        return _platform_get_active_window_info()
-
     def _update_window_state(self, window_info=None):
         """Update current window state (no log write)."""
         if window_info:
             app_name, window_title, bundle_id = window_info
         else:
-            app_name, window_title, bundle_id = self._get_active_window_info()
+            app_name, window_title, bundle_id = get_backend().get_active_window_info()
         self._current_app_name = app_name
         self._current_window_title = window_title
         self._current_bundle_id = bundle_id
@@ -531,104 +264,12 @@ class MouseCapture:
         return day_dir
 
     def _get_window_at_point(self, x: int, y: int) -> tuple[str, str, str]:
-        """Get window info at screen coordinates."""
-        if _IS_MACOS:
-            return self._get_window_at_point_macos(x, y)
-        elif _IS_WINDOWS:
-            return _get_window_at_point_windows(x, y)
-        return _get_active_window_info_fallback()
-
-    def _get_window_at_point_macos(self, x: int, y: int) -> tuple[str, str, str]:
-        """macOS: use CGWindowListCopyWindowInfo to find window at point."""
-        try:
-            window_list = Quartz.CGWindowListCopyWindowInfo(
-                Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
-                Quartz.kCGNullWindowID,
-            )
-            if not window_list:
-                return "Unknown", "", "Unknown"
-
-            for window in window_list:
-                bounds = window.get(Quartz.kCGWindowBounds)
-                if not bounds:
-                    continue
-
-                wx = int(bounds.get("X", 0))
-                wy = int(bounds.get("Y", 0))
-                ww = int(bounds.get("Width", 0))
-                wh = int(bounds.get("Height", 0))
-
-                layer = window.get(Quartz.kCGWindowLayer, -1)
-                if layer != 0:
-                    continue
-                if ww < 50 or wh < 50:
-                    continue
-
-                if wx <= x <= wx + ww and wy <= y <= wy + wh:
-                    pid = window.get(Quartz.kCGWindowOwnerPID, 0)
-                    owner_name = window.get(Quartz.kCGWindowOwnerName, "Unknown")
-                    window_name = window.get(Quartz.kCGWindowName, "") or ""
-
-                    bundle_id = "Unknown"
-                    try:
-                        app = AppKit.NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
-                        if app:
-                            bundle_id = app.bundleIdentifier() or "Unknown"
-                            owner_name = app.localizedName() or owner_name
-                    except Exception:
-                        pass
-
-                    return owner_name, window_name, bundle_id
-
-            # Fallback to frontmost app
-            try:
-                workspace = AppKit.NSWorkspace.sharedWorkspace()
-                active_app = workspace.frontmostApplication()
-                app_name = active_app.localizedName() or "Unknown"
-                bundle_id = active_app.bundleIdentifier() or "Unknown"
-                return app_name, "", bundle_id
-            except Exception:
-                pass
-        except Exception:
-            pass
-        return "Unknown", "", "Unknown"
+        """Get window info at screen coordinates via platform backend."""
+        return get_backend().get_window_at_point(x, y)
 
     def _get_active_window_bounds(self) -> Optional[tuple[int, int, int, int]]:
-        """Get the active window bounds (x, y, width, height)."""
-        if _IS_MACOS:
-            return self._get_active_window_bounds_macos()
-        elif _IS_WINDOWS:
-            return _get_active_window_bounds_windows()
-        return None
-
-    def _get_active_window_bounds_macos(self) -> Optional[tuple[int, int, int, int]]:
-        """macOS: get active window bounds via CGWindowList."""
-        try:
-            workspace = AppKit.NSWorkspace.sharedWorkspace()
-            active_app = workspace.frontmostApplication()
-            pid = active_app.processIdentifier()
-
-            window_list = Quartz.CGWindowListCopyWindowInfo(
-                Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements,
-                Quartz.kCGNullWindowID,
-            )
-
-            for window in window_list:
-                if window.get(Quartz.kCGWindowOwnerPID) == pid:
-                    bounds = window.get(Quartz.kCGWindowBounds)
-                    if not bounds:
-                        continue
-                    width = int(bounds.get("Width", 0))
-                    height = int(bounds.get("Height", 0))
-                    if width < 100 or height < 100:
-                        continue
-                    x = int(bounds.get("X", 0))
-                    y = int(bounds.get("Y", 0))
-                    return (x, y, width, height)
-            return None
-        except Exception as e:
-            print(f"[Warning] Failed to get window bounds: {e}")
-            return None
+        """Get the active window bounds via platform backend."""
+        return get_backend().get_active_window_bounds()
 
     def _capture_and_save(self, action: str, button: str,
                           x1: int, y1: int,
@@ -846,21 +487,12 @@ class AutoCapture:
         self.mic_capture = None
 
         if mic_enabled:
-            try:
-                from opencapture.mic_capture import MicrophoneCapture
-                cfg = mic_config or {}
-                self.mic_capture = MicrophoneCapture(
-                    storage_dir=self.storage_dir,
-                    key_logger=self.key_logger,
-                    sample_rate=cfg.get("mic_sample_rate", 16000),
-                    channels=cfg.get("mic_channels", 1),
-                    min_duration_ms=cfg.get("mic_min_duration_ms", cfg.get("mic_start_debounce_ms", 500)),
-                    stop_debounce_ms=cfg.get("mic_stop_debounce_ms", 300),
-                )
-            except ImportError as e:
-                print(f"[AutoCapture] Mic capture unavailable (missing dependency): {e}")
-            except Exception as e:
-                print(f"[AutoCapture] Mic capture init failed: {e}")
+            from opencapture.mic import create_mic_capture
+            self.mic_capture = create_mic_capture(
+                storage_dir=self.storage_dir,
+                key_logger=self.key_logger,
+                mic_config=mic_config,
+            )
 
         self._keyboard_listener: Optional[keyboard.Listener] = None
         self._mouse_listener: Optional[mouse.Listener] = None
@@ -912,91 +544,43 @@ class AutoCapture:
 
     @staticmethod
     def _check_accessibility(prompt=False):
-        """Check platform accessibility permissions.
+        """Check platform accessibility permissions (delegates to backend)."""
+        return get_backend().check_accessibility(prompt=prompt)
 
-        On macOS: checks Accessibility permission via AXIsProcessTrusted.
-        On Windows: always returns True (no special permission needed).
-
-        Args:
-            prompt: If True, trigger macOS native permission dialog.
-        Returns True if granted.
-        """
-        if sys.platform != 'darwin':
-            return True
-        try:
-            import ctypes as _ct
-            lib = _ct.cdll.LoadLibrary(
-                '/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices'
-            )
-            if prompt:
-                cf = _ct.cdll.LoadLibrary(
-                    '/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation'
-                )
-                kAXTrustedCheckOptionPrompt = _ct.c_void_p.in_dll(
-                    lib, 'kAXTrustedCheckOptionPrompt'
-                )
-                kCFBooleanTrue = _ct.c_void_p.in_dll(cf, 'kCFBooleanTrue')
-
-                cf.CFDictionaryCreate.restype = _ct.c_void_p
-                cf.CFDictionaryCreate.argtypes = [
-                    _ct.c_void_p, _ct.POINTER(_ct.c_void_p),
-                    _ct.POINTER(_ct.c_void_p), _ct.c_long,
-                    _ct.c_void_p, _ct.c_void_p,
-                ]
-                keys = (_ct.c_void_p * 1)(kAXTrustedCheckOptionPrompt)
-                values = (_ct.c_void_p * 1)(kCFBooleanTrue)
-                options = cf.CFDictionaryCreate(None, keys, values, 1, None, None)
-
-                lib.AXIsProcessTrustedWithOptions.restype = _ct.c_bool
-                lib.AXIsProcessTrustedWithOptions.argtypes = [_ct.c_void_p]
-                result = lib.AXIsProcessTrustedWithOptions(options)
-                cf.CFRelease.argtypes = [_ct.c_void_p]
-                cf.CFRelease(options)
-                return result
-            else:
-                lib.AXIsProcessTrusted.restype = _ct.c_bool
-                return lib.AXIsProcessTrusted()
-        except Exception:
-            return True  # Can't check, assume OK
+    @property
+    def is_running(self) -> bool:
+        return self._running
 
     def run(self):
-        """Run capture (blocking)."""
-        if _IS_MACOS:
-            if not self._check_accessibility(prompt=False):
-                print("[AutoCapture] Requesting Accessibility permission...")
-                self._check_accessibility(prompt=True)
-                print("[AutoCapture] Grant access to OpenCapture in System Settings -> Accessibility")
+        """Run capture (blocking). Checks permissions, starts, and runs event loop."""
+        backend = get_backend()
 
-                max_wait = 100 if sys.stdout.isatty() else 40
-                print("[AutoCapture] Waiting for permission...")
+        if not backend.check_accessibility(prompt=False):
+            print("[AutoCapture] Requesting Accessibility permission...")
+            backend.check_accessibility(prompt=True)
+            print("[AutoCapture] Grant access to OpenCapture in System Settings -> Accessibility")
 
-                granted = False
-                for i in range(max_wait):
-                    time.sleep(3)
-                    if self._check_accessibility(prompt=False):
-                        granted = True
-                        break
-                    if i % 10 == 9:
-                        print("[AutoCapture] Still waiting for permission...")
+            max_wait = 100 if sys.stdout.isatty() else 40
+            print("[AutoCapture] Waiting for permission...")
 
-                if not granted:
-                    print("[AutoCapture] Permission not granted.")
-                    sys.exit(1)
-                print("[AutoCapture] Accessibility permission granted!")
+            granted = False
+            for i in range(max_wait):
+                time.sleep(3)
+                if backend.check_accessibility(prompt=False):
+                    granted = True
+                    break
+                if i % 10 == 9:
+                    print("[AutoCapture] Still waiting for permission...")
+
+            if not granted:
+                print("[AutoCapture] Permission not granted.")
+                sys.exit(1)
+            print("[AutoCapture] Accessibility permission granted!")
 
         self.start()
 
         try:
-            if _IS_MACOS:
-                # Use NSRunLoop for macOS notification dispatch
-                run_loop = AppKit.NSRunLoop.currentRunLoop()
-                while self._running:
-                    until = AppKit.NSDate.dateWithTimeIntervalSinceNow_(0.1)
-                    run_loop.runUntilDate_(until)
-            else:
-                # Simple sleep loop for Windows/Linux
-                while self._running:
-                    time.sleep(0.1)
+            backend.run_event_loop(lambda: self._running)
         except KeyboardInterrupt:
             pass
         finally:

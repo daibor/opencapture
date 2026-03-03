@@ -2,10 +2,11 @@
 """
 PyInstaller spec for OpenCapture Windows .exe.
 
-Capture is macOS-only; this build supports analysis commands on Windows:
+Supports analysis commands and GUI system tray on Windows:
     OpenCapture.exe --analyze today
     OpenCapture.exe --image screenshot.webp
     OpenCapture.exe --health-check
+    OpenCapture.exe gui             (system tray app)
 
 Build (on Windows):
     pip install pyinstaller
@@ -34,6 +35,11 @@ a = Analysis(
     hiddenimports=[
         "opencapture",
         "opencapture.cli",
+        "opencapture.app",
+        "opencapture.gui",
+        "opencapture.gui.base",
+        "opencapture.gui.generic",
+        "opencapture.engine",
         "opencapture.auto_capture",
         "opencapture.config",
         "opencapture.llm_client",
@@ -41,6 +47,8 @@ a = Analysis(
         "opencapture.report_generator",
         "pynput.keyboard._win32",
         "pynput.mouse._win32",
+        "pystray",
+        "pystray._win32",
     ],
     hookspath=[],
     hooksconfig={},

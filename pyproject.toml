@@ -21,6 +21,7 @@ dependencies = [
     "pystray>=0.19.5",
     "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
     "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
+    "pystray>=0.19; sys_platform != 'darwin'",
 ]
 
 [project.scripts]
@@ -36,9 +37,8 @@ dev = [
     "pytest-cov>=5.0",
 ]
 
-[tool.setuptools]
-packages = ["opencapture"]
-package-dir = {"" = "src"}
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
 opencapture = ["config/*.yaml"]

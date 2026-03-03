@@ -553,8 +553,8 @@ def main():
               opencapture log [-f]            Show/follow service logs
 
             GUI:
-              opencapture gui                 Launch GUI (native macOS / tray on Windows)
-              opencapture gui --tray          Force cross-platform tray GUI
+              opencapture gui                 Launch system tray app (macOS/Windows)
+              opencapture gui --tray          Force cross-platform tray backend
 
             Examples:
               opencapture                     Start capture (foreground)
@@ -627,10 +627,12 @@ def main():
         cmd_log(follow=follow)
         return
     if args.command == "gui":
-        use_tray = "--tray" in args.extra_args
-        if use_tray or sys.platform != "darwin":
-            from opencapture.app_tray import main as tray_main
-            tray_main()
+        if "--tray" in args.extra_args:
+            # Force cross-platform tray backend (pystray + tkinter)
+            from opencapture.config import init_config
+            from opencapture.gui.generic import GenericTrayApp
+            config = init_config()
+            GenericTrayApp(config).run()
         else:
             from opencapture.app import main as gui_main
             gui_main()

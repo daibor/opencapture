@@ -9,9 +9,9 @@ OpenCapture uses a three-layer architecture that separates core components, engi
 ```mermaid
 graph TD
     subgraph "Layer 2: Frontends"
-        CLI["CLI — cli.py<br/>terminal capture + analysis"]
-        GUI["GUI — app.py<br/>macOS menu bar + log window"]
-        SVC["Service — launchd<br/>background daemon via CLI"]
+        CLI["CLI — cli.py<br/>capture via CaptureEngine + analysis"]
+        GUI["GUI — app.py + gui/<br/>cross-platform system tray"]
+        SVC["Service — service.py<br/>LaunchdManager / ProcessManager"]
     end
 
     subgraph "Layer 1: Engines — engine.py"
@@ -20,10 +20,12 @@ graph TD
     end
 
     subgraph "Layer 0: Core Components"
+        PLT["PlatformBackend — platform/<br/>MacOS · Windows · Fallback"]
         CAP["KeyLogger, MouseCapture<br/>WindowTracker — auto_capture.py"]
-        MIC["MicrophoneCapture — mic_capture.py"]
+        MIC["MicCapture — mic/<br/>factory → platform impl or None"]
         ANA["Analyzer, LLMRouter<br/>ASRClient — analyzer.py, llm_client.py"]
         CFG["Config — config.py"]
+        CAP --> PLT
     end
 
     CLI --> CE
@@ -37,15 +39,31 @@ graph TD
 
 ## Layer 0: Core Components
 
-Existing classes with minimal changes. These handle raw input capture and AI analysis.
+Core components handle raw input capture, platform abstraction, and AI analysis.
 
-### Capture Components (auto_capture.py, mic_capture.py)
+### Platform Backend (platform/)
 
-- **KeyLogger** — Keyboard event aggregation, log writing, screenshot/mic event logging
-- **MouseCapture** — Click/double-click/drag detection, screenshot capture
-- **WindowTracker** — Active window monitoring via NSWorkspace notifications
-- **MicrophoneCapture** — Core Audio microphone monitoring, sounddevice recording
+ABC-based platform abstraction with a singleton factory `get_backend()`:
+
+- **PlatformBackend** (`_base.py`) — Abstract base defining: `get_active_window_info()`, `get_window_at_point()`, `get_active_window_bounds()`, `start_window_observer()`, `stop_window_observer()`, `check_accessibility()`, `run_event_loop()`, `get_key_symbols()`
+- **MacOSBackend** (`_macos.py`) — AppKit/Quartz window info, NSWorkspace notification observer, AXIsProcessTrusted, NSRunLoop event loop, macOS Unicode key symbols
+- **WindowsBackend** (`_windows.py`) — Win32 ctypes (GetForegroundWindow, GetWindowText), polling-based window observer, Windows key labels (Ctrl/Alt/Win)
+- **FallbackBackend** (`_fallback.py`) — Minimal stubs for unsupported platforms
+
+### Capture Components (auto_capture.py)
+
+- **KeyLogger** — Keyboard event aggregation, log writing, screenshot/mic event logging. Key symbols loaded from `get_backend().get_key_symbols()`
+- **MouseCapture** — Click/double-click/drag detection, screenshot capture. Window info via `get_backend().get_window_at_point()`
+- **WindowTracker** — Active window monitoring via `get_backend().start_window_observer()` (NSWorkspace on macOS, polling on Windows)
 - **AutoCapture** — Controller that wires components together, manages pynput listeners
+
+### Microphone Capture (mic/)
+
+Factory pattern with `create_mic_capture()` returning platform-appropriate implementation or None:
+
+- **MicCaptureBase** (`_base.py`) — ABC with `start()` and `stop()` methods
+- **MacOSMicCapture** (`macos.py`) — Core Audio microphone monitoring, sounddevice recording. Records when external apps use the mic; identifies process via macOS 14+ AudioProcess API
+- Returns `None` on non-macOS platforms (microphone capture not yet supported)
 
 ### Analysis Components (analyzer.py, llm_client.py)
 
@@ -104,11 +122,11 @@ class AnalysisEngine:
 
 ### CLI (cli.py)
 
-The existing command-line interface. Uses AutoCapture directly for capture mode (backwards compatible) and can optionally use CaptureEngine.
+The command-line interface. All capture goes through CaptureEngine (unified entry point for all three distribution methods).
 
-- `opencapture` — Foreground capture (AutoCapture.run())
+- `opencapture` — Foreground capture via CaptureEngine + `backend.run_event_loop()`
 - `opencapture --analyze today` — Analysis via Analyzer
-- `opencapture start/stop/status` — launchd service management
+- `opencapture start/stop/status` — Service management via `ServiceManager`
 - `opencapture gui` — Launch GUI frontend
 
 ### GUI (app.py)
@@ -122,17 +140,21 @@ macOS menu bar application using PyObjC.
 - Uses CaptureEngine + AnalysisEngine
 - NSApplication.run() pumps NSRunLoop (required for WindowTracker)
 
-### Service (launchd)
+### Service (service.py)
 
-Background daemon managed via `opencapture start/stop`. Runs the CLI in capture mode as a LaunchAgent. No changes needed.
+Background daemon managed via `opencapture start/stop`. Uses `ServiceManager` abstraction:
+
+- **LaunchdManager** (macOS) — manages launchd plist, runs CLI as LaunchAgent
+- **ProcessManager** (Windows) — PID-file based process tracking, starts CLI as subprocess
+- `get_service_manager()` factory returns the appropriate manager or None
 
 ## Thread Model
 
 ```mermaid
 graph LR
     subgraph "Main Thread"
-        RL["NSRunLoop / CLI loop"]
-        WT["WindowTracker notifications"]
+        RL["backend.run_event_loop()<br/>NSRunLoop (macOS) / sleep loop (Windows)"]
+        WT["WindowTracker<br/>observer callback"]
         RL --> WT
     end
 

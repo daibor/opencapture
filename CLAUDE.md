@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpenCapture is a macOS/Linux tool that records keyboard and mouse activity, captures screenshots, optionally records microphone audio, and uses AI (local Ollama or remote APIs) to analyze user behavior. All data is stored locally.
+OpenCapture is a cross-platform tool (macOS, Windows, Linux) that records keyboard and mouse activity, captures screenshots, optionally records microphone audio, and uses AI (local Ollama or remote APIs) to analyze user behavior. All data is stored locally. Platform-specific functionality is abstracted behind a backend interface (`src/opencapture/platform/`).
 
 ## Installation & Commands
 
@@ -36,7 +36,7 @@ opencapture --list-dates               # List available dates
 opencapture gui                        # Launch menu bar GUI
 opencapture-gui                        # Standalone GUI entry point
 
-# Service management (macOS launchd)
+# Service management (macOS: launchd, Windows: PID-file process)
 opencapture start                      # Start as background service
 opencapture stop                       # Stop service
 opencapture restart                    # Restart service
@@ -56,9 +56,9 @@ Three-layer design (see `docs/specs/architecture.md` for full spec):
 ```mermaid
 graph TD
     subgraph "Layer 2: Frontends"
-        CLI["CLI<br/>cli.py"]
-        GUI["GUI Menu Bar<br/>app.py"]
-        SVC["Service<br/>launchd"]
+        CLI["CLI — cli.py"]
+        GUI["GUI — app.py + gui/"]
+        SVC["Service — service.py"]
     end
 
     subgraph "Layer 1: Engines — engine.py"
@@ -67,10 +67,12 @@ graph TD
     end
 
     subgraph "Layer 0: Core Components"
+        PLT["PlatformBackend — platform/<br/>macOS · Windows · Fallback"]
         KL["KeyLogger"]
         MC["MouseCapture"]
         WT["WindowTracker"]
-        MIC["MicrophoneCapture"]
+        MIC["MicCapture — mic/<br/>factory → macOS impl or None"]
+        KL & MC & WT --> PLT
         KL & MC & WT & MIC --> LOG["KeyLogger<br/>unified log writer"]
         MIC --> WAV[".wav recordings"]
         LOG --> FILES[".log files + .webp screenshots"]
@@ -86,8 +88,7 @@ graph TD
     end
 
     CLI --> CE
-    GUI --> CE
-    GUI --> AE
+    GUI --> CE & AE
     SVC --> CLI
     CE --> KL
     AE --> ANA
@@ -95,17 +96,21 @@ graph TD
 
 **Key modules:**
 
-- `src/opencapture/auto_capture.py` - Core capture: `KeyLogger`, `MouseCapture`, `WindowTracker`, `AutoCapture`
-- `src/opencapture/mic_capture.py` - Microphone monitoring: `MicrophoneCapture` (Core Audio ctypes + sounddevice). Records when external apps use the mic; identifies which process via macOS 14+ AudioProcess API
+- `src/opencapture/platform/` - Platform backend abstraction: `PlatformBackend` ABC (`_base.py`), `MacOSBackend` (`_macos.py`), `WindowsBackend` (`_windows.py`), `FallbackBackend` (`_fallback.py`). Singleton factory `get_backend()` in `__init__.py`
+- `src/opencapture/auto_capture.py` - Core capture: `KeyLogger`, `MouseCapture`, `WindowTracker`, `AutoCapture`. All platform calls go through `get_backend()`
+- `src/opencapture/mic/` - Microphone capture: `MicCaptureBase` ABC (`_base.py`), `MacOSMicCapture` (`macos.py`). Factory `create_mic_capture()` in `__init__.py` returns platform impl or None
 - `src/opencapture/engine.py` - Engine layer: `CaptureEngine` (lifecycle + event dispatch), `AnalysisEngine` (async analysis + progress)
-- `src/opencapture/app.py` - GUI frontend: macOS menu bar app with log window (PyObjC)
+- `src/opencapture/service.py` - Service management: `ServiceManager` ABC, `LaunchdManager` (macOS), `ProcessManager` (Windows). Factory `get_service_manager()`
+- `src/opencapture/gui/` - Cross-platform GUI: `TrayAppBase` (`base.py`), `MacOSTrayApp` (`macos.py`), `GenericTrayApp` (`generic.py`). Factory `create_app()` in `__init__.py`
+- `src/opencapture/app.py` - GUI entry point: config init → `create_app(config).run()`
+- `src/opencapture/cli.py` - Unified CLI: capture via `CaptureEngine`, analysis, service management via `ServiceManager`, GUI launch
 - `src/opencapture/llm_client.py` - LLM abstraction: `BaseLLMClient`, `OllamaClient`, `OpenAIClient`, `AnthropicClient`, `LLMRouter`, `ASRClient`
 - `src/opencapture/analyzer.py` - Orchestrates LLM analysis and audio transcription with `Analyzer` class
 - `src/opencapture/report_generator.py` - Markdown report generation: `ReportGenerator`, `ReportAggregator`
 - `src/opencapture/config.py` - Configuration management with environment variable support
-- `src/opencapture/cli.py` - Unified CLI: capture, analysis, service management, and GUI launch
 - `run.py` - Development entry point (thin wrapper with sys.path hack)
 - `packaging/macos.spec` - PyInstaller spec for macOS .app bundle
+- `packaging/windows.spec` - PyInstaller spec for Windows .exe
 
 ## Configuration
 
@@ -137,7 +142,9 @@ Analysis: Each `.webp` and `.wav` gets a companion `.txt` file with the LLM/ASR 
 
 Reports: `~/opencapture/reports/YYYY-MM-DD.md` and `YYYY-MM-DD_images.md`
 
-## macOS Requirements
+## Platform Requirements
+
+### macOS
 
 Requires permissions in System Settings > Privacy & Security:
 - **Accessibility** - for keyboard/mouse monitoring
@@ -145,6 +152,12 @@ Requires permissions in System Settings > Privacy & Security:
 - **Microphone** - for audio recording (if `mic_enabled: true`)
 
 When built with PyInstaller, the `.app` bundle (`OpenCapture.app`) has bundle ID `com.opencapture.agent` so macOS TCC shows "OpenCapture" in permission dialogs.
+
+### Windows
+
+- No special permissions required for keyboard/mouse monitoring
+- Microphone capture is not yet supported (returns None from `create_mic_capture()`)
+- Service management uses PID-file based process tracking (`ProcessManager`)
 
 ## Testing
 

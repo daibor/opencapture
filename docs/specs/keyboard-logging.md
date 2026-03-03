@@ -51,7 +51,9 @@ Regular characters are recorded as-is (e.g., `a`, `B`, `1`, `@`).
 
 ### Special Keys
 
-Special keys are represented using macOS keyboard symbols:
+Special key symbols are provided by the platform backend via `get_backend().get_key_symbols()`. This allows each platform to use its native conventions:
+
+#### macOS Symbols (default)
 
 | Key | Symbol | Key | Symbol |
 |-----|--------|-----|--------|
@@ -66,6 +68,17 @@ Special keys are represented using macOS keyboard symbols:
 | Home | `↖` | End | `↘` |
 | Page Up | `⇞` | Page Down | `⇟` |
 | F1-F12 | `F1`-`F12` | | |
+
+#### Windows Labels
+
+On Windows, modifier keys use text labels instead of Unicode symbols:
+
+| Key | Label | Key | Label |
+|-----|-------|-----|-------|
+| Ctrl (L/R) | `Ctrl` | Alt (L/R) | `Alt` |
+| Win (L/R) | `Win` | Shift (L/R) | `Shift` |
+
+Other special keys use the same Unicode symbols as macOS.
 
 ### Unknown Keys
 

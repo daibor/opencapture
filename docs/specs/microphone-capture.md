@@ -4,6 +4,16 @@
 
 Audio from the system microphone is recorded **only when the microphone is actively in use by another application** (e.g., during a voice call in Zoom, WeChat, FaceTime, or voice input in dictation apps). This captures the user's spoken input as part of the activity log.
 
+## Implementation
+
+Microphone capture uses the factory pattern in `src/opencapture/mic/`:
+
+- **`MicCaptureBase`** (`_base.py`) — Abstract base class with `start()` and `stop()` methods
+- **`MacOSMicCapture`** (`macos.py`) — macOS implementation using Core Audio ctypes + sounddevice
+- **`create_mic_capture()`** (`__init__.py`) — Factory that returns the platform-appropriate implementation or `None`
+
+Currently only macOS is supported. On other platforms, `create_mic_capture()` returns `None` and microphone capture is silently disabled.
+
 ## Trigger Rules
 
 ### Start Recording
@@ -175,11 +185,17 @@ A typical day with voice dictation, a FaceTime call, and a Zoom meeting — inte
 | `mic_start_debounce_ms` | `500` | Minimum active duration before recording starts |
 | `mic_stop_debounce_ms` | `2000` | Minimum idle duration before recording stops |
 
-## macOS Requirements
+## Platform Support
+
+### macOS
 
 - **Microphone permission**: Required. macOS will prompt for consent on first access. Must be granted in System Settings > Privacy & Security > Microphone.
 - **Orange indicator dot**: The system status bar will display an orange dot while the microphone is being accessed. This is a system-level privacy indicator and cannot be suppressed.
 - **Shared access**: macOS allows multiple applications to access the microphone simultaneously. This capture does not interfere with the application that triggered the microphone usage.
+
+### Windows / Linux
+
+Not yet implemented. `create_mic_capture()` returns `None` on these platforms.
 
 ## Privacy Considerations
 

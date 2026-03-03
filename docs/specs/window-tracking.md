@@ -16,21 +16,23 @@ For each active window, three properties are recorded:
 
 ## Detection Methods
 
-### Application Switch Detection
+Window tracking is handled by the platform backend (`PlatformBackend.start_window_observer()`). The backend calls a callback with `(app_name, window_title, bundle_id)` whenever the active window changes.
 
-Application switches are detected via macOS `NSWorkspaceDidActivateApplicationNotification`. This fires whenever a different application becomes the frontmost app.
+### macOS (MacOSBackend)
 
-### Window Title Detection
+- **Application switches**: Detected via `NSWorkspaceDidActivateApplicationNotification`
+- **Window titles**: Retrieved through the Accessibility API (`AXTitle` attribute)
+- **Fallback**: If no focused window exists, falls back to the first window in the window list
 
-Window titles are retrieved through the macOS Accessibility API:
+### Windows (WindowsBackend)
 
-1. Get the focused window of the frontmost application
-2. Read its `AXTitle` attribute
-3. If no focused window exists, fall back to the first window in the window list
+- **Polling-based**: A background thread polls `GetForegroundWindow()` at regular intervals
+- **Window titles**: Retrieved via `GetWindowTextW()`
+- **Process info**: PID → executable path via `GetModuleFileNameExW()`
 
 ### Per-Keypress Polling
 
-In addition to notification-based detection, every keypress triggers a fresh check of the active window info. This catches in-app window/tab switches that do not generate an application activation notification (e.g., switching tabs in a browser or switching files in an editor).
+In addition to observer-based detection, every keypress triggers a fresh check of the active window info via `get_backend().get_active_window_info()`. This catches in-app window/tab switches that do not generate an application activation notification (e.g., switching tabs in a browser or switching files in an editor).
 
 ## Change Detection
 
@@ -41,7 +43,11 @@ A window change is considered to have occurred when **either** the app name or t
 - **Keyboard Logger**: Window changes trigger a flush of the current keystroke line and insertion of a new block header in the log file (see keyboard-logging spec)
 - **Screenshot Capture**: The active window bounds are used to draw the highlight border on screenshots (see screenshot-capture spec)
 
-## macOS Requirements
+## Platform Requirements
 
+### macOS
 - **Accessibility permission**: Required for reading window titles via the Accessibility API. Must be granted in System Settings > Privacy & Security > Accessibility.
 - **Screen Recording permission**: Required for screenshot capture and window enumeration. Must be granted in System Settings > Privacy & Security > Screen Recording.
+
+### Windows
+- No special permissions required for window tracking.

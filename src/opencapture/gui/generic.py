@@ -244,6 +244,10 @@ class GenericTrayApp(TrayAppBase):
         else:
             messagebox.showinfo("Analysis Complete", message)
 
+    def on_status_update(self, text: str):
+        if self._icon:
+            self._icon.title = text
+
     def show_alert(self, title: str, message: str):
         messagebox.showwarning(title, message)
 

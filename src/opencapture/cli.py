@@ -228,36 +228,6 @@ async def _run_analyze_inner(analyzer, args, config):
             print(f"  - {date}")
         return
 
-    # Analyze single image
-    if args.image:
-        if not await analyzer.preflight_check(args.provider):
-            return
-        if not analyzer.confirm_online_usage(args.provider):
-            return
-        print(f"Analyzing image: {args.image}")
-        result = await analyzer.analyze_image(
-            args.image,
-            provider=args.provider,
-            save_txt=True,
-        )
-        if result.success:
-            print(f"\n{result.content}")
-            print(f"\n[Time: {result.inference_time:.2f}s]")
-        else:
-            print(f"Error: {result.error}")
-        return
-
-    # Transcribe single audio
-    if args.audio:
-        print(f"Transcribing audio: {args.audio}")
-        result = await analyzer.analyze_audio(args.audio, save_txt=True)
-        if result.success:
-            print(f"\n{result.content}")
-            print(f"\n[Time: {result.inference_time:.2f}s]")
-        else:
-            print(f"Error: {result.error}")
-        return
-
     # Analyze specific date
     from datetime import datetime, timedelta
 
@@ -278,11 +248,20 @@ async def _run_analyze_inner(analyzer, args, config):
     if not analyzer.confirm_online_usage(args.provider):
         return
 
+    def _print_progress(stage, current, total, detail):
+        if total > 0:
+            print(f"\r  [{stage}] {current}/{total} {detail}        ", end="", flush=True)
+        else:
+            print(f"  [{stage}] {detail}")
+
     results = await analyzer.analyze_day(
         date_str,
         generate_reports=not args.no_reports,
         provider=args.provider,
+        on_progress=_print_progress,
     )
+    # Clear progress line
+    print()
 
     if "error" in results:
         print(f"Error: {results['error']}")
@@ -331,8 +310,6 @@ def main():
               opencapture                     Start capture (foreground)
               opencapture --analyze today     Analyze today's data
               opencapture --analyze 2026-02-01
-              opencapture --image pic.webp    Analyze single image
-              opencapture --audio mic.wav     Transcribe single audio
               opencapture --provider openai   Use OpenAI for analysis
         """),
     )
@@ -363,8 +340,6 @@ def main():
         const="today",
         help="Analysis mode: today, yesterday, or YYYY-MM-DD",
     )
-    parser.add_argument("--image", help="Analyze single image")
-    parser.add_argument("--audio", help="Transcribe single audio file")
     parser.add_argument(
         "--provider",
         choices=["ollama", "openai", "anthropic", "custom"],
@@ -423,7 +398,7 @@ def main():
         sys.exit(0 if get_backend().check_accessibility(prompt=False) else 1)
 
     # Determine run mode
-    if args.analyze or args.image or args.audio or args.health_check or args.list_dates:
+    if args.analyze or args.health_check or args.list_dates:
         # Analysis mode
         if args.analyze:
             args.date = args.analyze

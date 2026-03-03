@@ -9,7 +9,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Callable, Dict, Any, Optional, List
 
 from .config import Config, get_config
 from .llm_client import LLMRouter, AnalysisResult
@@ -295,7 +295,9 @@ class Analyzer:
         date_dir: Path,
         limit: Optional[int] = None,
         skip_existing: bool = True,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        on_progress: Optional[Callable] = None,
+        cancel_event: Optional[asyncio.Event] = None,
     ) -> int:
         """
         Batch analyze images in directory
@@ -305,6 +307,8 @@ class Analyzer:
             limit: Limit number of images
             skip_existing: Skip images with existing txt files
             provider: LLM provider
+            on_progress: Callback(stage, current, total, detail)
+            cancel_event: asyncio.Event to signal cancellation
 
         Returns:
             int: Number of successfully analyzed images
@@ -330,7 +334,13 @@ class Analyzer:
         success_count = 0
 
         for i, image_path in enumerate(images):
+            if cancel_event and cancel_event.is_set():
+                logger.info("Analysis cancelled")
+                break
+
             logger.info(f"[{i+1}/{len(images)}] {image_path.name}")
+            if on_progress:
+                on_progress("images", i + 1, len(images), image_path.name)
 
             result = await self.analyze_image(
                 str(image_path),
@@ -407,6 +417,8 @@ class Analyzer:
         date_dir: Path,
         limit: Optional[int] = None,
         skip_existing: bool = True,
+        on_progress: Optional[Callable] = None,
+        cancel_event: Optional[asyncio.Event] = None,
     ) -> int:
         """
         Batch transcribe audio files in directory
@@ -415,6 +427,8 @@ class Analyzer:
             date_dir: Date directory
             limit: Limit number of files
             skip_existing: Skip files with existing txt
+            on_progress: Callback(stage, current, total, detail)
+            cancel_event: asyncio.Event to signal cancellation
 
         Returns:
             int: Number of successfully transcribed files
@@ -437,7 +451,13 @@ class Analyzer:
 
         success_count = 0
         for i, audio_path in enumerate(audios):
+            if cancel_event and cancel_event.is_set():
+                logger.info("Transcription cancelled")
+                break
+
             logger.info(f"[{i+1}/{len(audios)}] {audio_path.name}")
+            if on_progress:
+                on_progress("audios", i + 1, len(audios), audio_path.name)
 
             result = await self.analyze_audio(str(audio_path), save_txt=True)
 
@@ -456,7 +476,9 @@ class Analyzer:
         analyze_images: bool = True,
         analyze_logs: bool = True,
         generate_reports: bool = True,
-        provider: Optional[str] = None
+        provider: Optional[str] = None,
+        on_progress: Optional[Callable] = None,
+        cancel_event: Optional[asyncio.Event] = None,
     ) -> Dict[str, Any]:
         """
         Analyze all data for a specific day
@@ -467,6 +489,8 @@ class Analyzer:
             analyze_logs: Analyze logs
             generate_reports: Generate reports
             provider: LLM provider
+            on_progress: Callback(stage, current, total, detail)
+            cancel_event: asyncio.Event to signal cancellation
 
         Returns:
             Dict: Analysis statistics
@@ -479,6 +503,8 @@ class Analyzer:
             return {"error": f"Directory not found: {date_dir}"}
 
         # Pre-flight check
+        if on_progress:
+            on_progress("preflight", 0, 0, "Checking LLM provider...")
         if analyze_images or analyze_logs:
             if not await self.preflight_check(provider):
                 return {"error": "LLM provider not ready. See above for details."}
@@ -493,33 +519,62 @@ class Analyzer:
 
         # Analyze images
         if analyze_images:
+            if cancel_event and cancel_event.is_set():
+                return results
             results["images_analyzed"] = await self.analyze_images_batch(
                 date_dir,
                 skip_existing=True,
-                provider=provider
+                provider=provider,
+                on_progress=on_progress,
+                cancel_event=cancel_event,
             )
 
         # Transcribe audio files
         if self.llm_router.asr_client:
+            if cancel_event and cancel_event.is_set():
+                return results
             results["audios_transcribed"] = await self.analyze_audios_batch(
                 date_dir,
                 skip_existing=True,
+                on_progress=on_progress,
+                cancel_event=cancel_event,
             )
 
-        # Analyze logs (if enabled)
+        # Analyze logs — call LLM for each keyboard session
         if analyze_logs:
             log_file = date_dir / f"{date_str}.log"
             if log_file.exists():
                 sessions = self.report_aggregator.parse_log_file(log_file)
-                results["logs_analyzed"] = len(sessions)
+                analyzed_count = 0
+                for i, session in enumerate(sessions):
+                    if cancel_event and cancel_event.is_set():
+                        logger.info("Log analysis cancelled")
+                        break
+                    if session.content.strip():
+                        if on_progress:
+                            on_progress("logs", i + 1, len(sessions), session.window_app)
+                        result = await self.analyze_keyboard_log(
+                            session.content, window=session.window_app, provider=provider
+                        )
+                        if result.success:
+                            session.analysis = result.content
+                            analyzed_count += 1
+                results["logs_analyzed"] = analyzed_count
 
         # Generate reports
         if generate_reports:
+            if cancel_event and cancel_event.is_set():
+                return results
+            if on_progress:
+                on_progress("reports", 0, 0, "Generating reports...")
             reports = await self.report_aggregator.generate_reports_for_date(
                 date_str,
                 generate_summary=self.config.get("reports.daily_summary", True)
             )
             results["reports_generated"] = list(reports.values())
+
+        if on_progress:
+            on_progress("done", 0, 0, "Analysis complete")
 
         return results
 

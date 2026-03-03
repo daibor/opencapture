@@ -148,6 +148,18 @@ class AnalysisEngine:
         self._config = config
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
+        self._analyzing = False
+        self._cancel_event: Optional[asyncio.Event] = None
+
+    @property
+    def is_analyzing(self) -> bool:
+        """True while an analysis task is running."""
+        return self._analyzing
+
+    def cancel_analysis(self):
+        """Signal the running analysis to stop early."""
+        if self._cancel_event:
+            self._cancel_event.set()
 
     def start(self):
         """Start background asyncio event loop thread."""
@@ -193,14 +205,22 @@ class AnalysisEngine:
 
         asyncio.run_coroutine_threadsafe(_wrapper(), self._loop)
 
-    def analyze_today(self, provider=None, callback=None, timeout=120):
+    def analyze_today(self, provider=None, callback=None, on_progress=None, timeout=120):
         """Submit analyze_day task to background loop.
 
         Args:
             provider: LLM provider name (or None for default).
             callback: Called with results dict when complete.
+            on_progress: Callback(stage, current, total, detail) for progress updates.
             timeout: Max seconds before giving up (default 120).
         """
+        if self._analyzing:
+            return  # Ignore duplicate calls
+
+        self._analyzing = True
+        self._cancel_event = asyncio.Event()
+        cancel_event = self._cancel_event
+
         async def _run():
             from .analyzer import Analyzer
             analyzer = Analyzer(self._config)
@@ -211,6 +231,8 @@ class AnalysisEngine:
                         date_str,
                         generate_reports=True,
                         provider=provider,
+                        on_progress=on_progress,
+                        cancel_event=cancel_event,
                     ),
                     timeout=timeout,
                 )
@@ -219,7 +241,13 @@ class AnalysisEngine:
             finally:
                 await analyzer.close()
 
-        self._submit(_run, callback)
+        def _callback_wrapper(result):
+            self._analyzing = False
+            self._cancel_event = None
+            if callback:
+                callback(result)
+
+        self._submit(_run, _callback_wrapper)
 
     def analyze_image(self, path, provider=None, callback=None):
         """Submit single image analysis.

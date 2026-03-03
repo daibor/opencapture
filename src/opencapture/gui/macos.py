@@ -290,6 +290,10 @@ class _AppDelegate(AppKit.NSObject):
         alert.runModal()
 
     @objc.typedSelector(b"v@:@")
+    def updateStatusLine_(self, text):
+        self._statusLineItem.setTitle_(str(text))
+
+    @objc.typedSelector(b"v@:@")
     def quitApp_(self, sender):
         self._trayApp.shutdown()
         AppKit.NSApp.terminate_(None)
@@ -342,6 +346,11 @@ class MacOSTrayApp(TrayAppBase):
         alert.setInformativeText_(message)
         alert.addButtonWithTitle_("OK")
         alert.runModal()
+
+    def on_status_update(self, text: str):
+        self._delegate.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "updateStatusLine:", text, False
+        )
 
     def refresh_status(self):
         text = self.get_status_text()

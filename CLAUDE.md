@@ -20,8 +20,6 @@ opencapture                            # Start recording (installed CLI)
 # Run analysis mode
 opencapture --analyze today            # Analyze today's data
 opencapture --analyze 2026-02-01       # Analyze specific date
-opencapture --image path/to/img.webp   # Analyze single image
-opencapture --audio path/to/mic.wav    # Transcribe single audio
 opencapture --provider openai --analyze today  # Use specific LLM
 
 # Using remote APIs (requires privacy.allow_online: true in config)

@@ -46,12 +46,31 @@ class TrayAppBase(ABC):
 
     def request_analysis(self):
         """Start async analysis of today's data."""
+        if self.analysis_engine.is_analyzing:
+            return  # Prevent duplicate submissions
         self.on_analysis_started()
         provider = self.config.get_default_provider()
         self.analysis_engine.analyze_today(
             provider=provider,
             callback=self._handle_analysis_result,
+            on_progress=self._on_progress,
         )
+
+    def _on_progress(self, stage, current, total, detail):
+        """Forward analysis progress to UI status update."""
+        if total > 0:
+            text = f"Analyzing: {stage} {current}/{total}"
+        else:
+            text = f"Analyzing: {stage}..."
+        self.on_status_update(text)
+
+    def on_status_update(self, text: str):
+        """Update the status line text during analysis.
+
+        Override in subclasses that need main-thread dispatch.
+        Default implementation does nothing.
+        """
+        pass
 
     def _handle_analysis_result(self, result):
         """Process analysis result dict and forward to UI."""

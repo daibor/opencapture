@@ -147,10 +147,7 @@ class KeyLogger:
             now = datetime.now()
             timestamp = now.strftime("%H:%M:%S")
 
-            if action == "drag" and x2 is not None:
-                line = f"[{timestamp}] \U0001f4f7 {action} ({x},{y})->({x2},{y2}) {filename}\n"
-            else:
-                line = f"[{timestamp}] \U0001f4f7 {action} ({x},{y}) {filename}\n"
+            line = f"[{timestamp}] \U0001f4f7 {filename}\n"
 
             log_file = self._get_log_file()
             with open(log_file, "a", encoding="utf-8") as f:

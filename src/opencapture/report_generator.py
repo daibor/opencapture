@@ -567,7 +567,7 @@ class ReportAggregator:
                     continue
 
                 # Screenshot record
-                screenshot_match = re.search(r'📷 \w+ \([^)]+\) (.+\.webp)', line)
+                screenshot_match = re.search(r'📷 (.+\.webp)', line)
                 if screenshot_match and session:
                     session.screenshots.append(screenshot_match.group(1))
                     continue

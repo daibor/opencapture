@@ -233,7 +233,7 @@ class Analyzer:
 
         # Parse image info
         info = self._parse_image_info(image_path)
-        action = info["action"]
+        action = info.pop("action")
 
         # Get prompt
         prompt = self.config.get_image_prompt(action, **info)

@@ -11,6 +11,12 @@ import pytest
 from opencapture.config import Config
 from opencapture.engine import CaptureEngine, AnalysisEngine
 
+try:
+    import pynput  # noqa: F401
+    HAS_PYNPUT = True
+except ImportError:
+    HAS_PYNPUT = False
+
 
 def _mock_backend(window_info=("App", "", "com.test")):
     """Create a mock PlatformBackend."""
@@ -102,6 +108,7 @@ class TestCaptureEngineEvents:
 # CaptureEngine — start / stop lifecycle
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(not HAS_PYNPUT, reason="pynput unavailable (no display)")
 class TestCaptureEngineLifecycle:
     def test_start_stop(self, config):
         backend = _mock_backend()

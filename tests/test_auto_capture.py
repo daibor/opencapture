@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
 
+pytest.importorskip("pynput")
+
 from opencapture.auto_capture import AutoCapture, WindowTracker
 
 

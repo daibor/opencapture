@@ -208,11 +208,15 @@ class AnalysisEngine:
     def analyze_today(self, provider=None, callback=None, on_progress=None, timeout=120):
         """Submit analyze_day task to background loop.
 
+        Uses a two-phase approach:
+        1. Quick preflight (10s timeout) — fast fail with actionable error
+        2. Run analysis (no global timeout) — per-image timeouts handle slow LLM
+
         Args:
             provider: LLM provider name (or None for default).
             callback: Called with results dict when complete.
             on_progress: Callback(stage, current, total, detail) for progress updates.
-            timeout: Max seconds before giving up (default 120).
+            timeout: Unused, kept for API compatibility.
         """
         if self._analyzing:
             return  # Ignore duplicate calls
@@ -225,19 +229,28 @@ class AnalysisEngine:
             from .analyzer import Analyzer
             analyzer = Analyzer(self._config)
             try:
+                # Phase 1: quick preflight (10s timeout)
+                if on_progress:
+                    on_progress("preflight", 0, 0, "Checking LLM provider...")
+                try:
+                    preflight = await asyncio.wait_for(
+                        analyzer.quick_preflight(provider), timeout=10
+                    )
+                except asyncio.TimeoutError:
+                    return {"error": "LLM provider check timed out. Is your LLM provider running?"}
+                if not preflight["ok"]:
+                    return {"error": preflight["error"]}
+
+                # Phase 2: run analysis (no global timeout)
                 date_str = datetime.now().strftime("%Y-%m-%d")
-                return await asyncio.wait_for(
-                    analyzer.analyze_day(
-                        date_str,
-                        generate_reports=True,
-                        provider=provider,
-                        on_progress=on_progress,
-                        cancel_event=cancel_event,
-                    ),
-                    timeout=timeout,
+                return await analyzer.analyze_day(
+                    date_str,
+                    generate_reports=True,
+                    provider=provider,
+                    on_progress=on_progress,
+                    cancel_event=cancel_event,
+                    skip_preflight=True,
                 )
-            except asyncio.TimeoutError:
-                return {"error": f"Analysis timed out after {timeout}s. Is your LLM provider running?"}
             finally:
                 await analyzer.close()
 

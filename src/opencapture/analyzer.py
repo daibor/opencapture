@@ -9,7 +9,9 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, Any, Optional, List
+from typing import Callable, Dict, Any, Optional, List, Tuple
+
+import aiohttp
 
 from .config import Config, get_config
 from .llm_client import LLMRouter, AnalysisResult
@@ -122,6 +124,101 @@ class Analyzer:
             return False
 
         return True
+
+    async def quick_preflight(self, provider: Optional[str] = None) -> dict:
+        """Quick preflight for GUI — returns structured result.
+
+        Returns {"ok": True} or {"ok": False, "error": "..."}
+        """
+        provider = provider or self.config.get_default_provider()
+
+        # 1. Check today's data directory
+        today = datetime.now().strftime("%Y-%m-%d")
+        date_dir = self.config.get_output_dir() / today
+        if not date_dir.exists():
+            return {"ok": False, "error": "No data for today. Start capture first."}
+
+        # 2. Remote provider blocked by privacy setting
+        if self.config.is_remote_provider(provider) and not self.config.is_online_allowed():
+            return {
+                "ok": False,
+                "error": (
+                    f"Remote provider '{provider}' requires opt-in.\n\n"
+                    f"Enable in config:\n"
+                    f"  privacy.allow_online: true\n\n"
+                    f"Or use local Ollama instead."
+                ),
+            }
+
+        # 3. Provider not configured
+        client = self.llm_router.get_client(provider)
+        if not client:
+            available = self.llm_router.list_providers()
+            hint = f"Available: {', '.join(available)}" if available else "No providers configured."
+            return {
+                "ok": False,
+                "error": f"Provider '{provider}' is not available.\n\n{hint}",
+            }
+
+        # 4. Provider-specific connectivity checks
+        if provider == "ollama":
+            return await self._check_ollama(client)
+        elif provider in ("openai", "anthropic"):
+            ok = await client.health_check()
+            if not ok:
+                env_var = "OPENAI_API_KEY" if provider == "openai" else "ANTHROPIC_API_KEY"
+                return {
+                    "ok": False,
+                    "error": (
+                        f"Cannot reach {provider} API.\n\n"
+                        f"Check your API key:\n"
+                        f"  export {env_var}=..."
+                    ),
+                }
+
+        return {"ok": True}
+
+    async def _check_ollama(self, client) -> dict:
+        """Check Ollama connectivity and model availability."""
+        try:
+            await client._ensure_session()
+            async with client.session.get(
+                f"{client.api_url}/api/tags",
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as response:
+                if response.status != 200:
+                    return {
+                        "ok": False,
+                        "error": (
+                            "Cannot connect to Ollama.\n\n"
+                            "Start Ollama:\n"
+                            "  ollama serve"
+                        ),
+                    }
+                data = await response.json()
+                models = [m.get("name") for m in data.get("models", [])]
+                if client.model not in models:
+                    return {
+                        "ok": False,
+                        "error": (
+                            f"Model '{client.model}' not found.\n\n"
+                            f"Install it:\n"
+                            f"  ollama pull {client.model}"
+                        ),
+                    }
+        except (aiohttp.ClientConnectorError, OSError):
+            return {
+                "ok": False,
+                "error": (
+                    "Cannot connect to Ollama.\n\n"
+                    "Start Ollama:\n"
+                    "  ollama serve"
+                ),
+            }
+        except Exception as e:
+            return {"ok": False, "error": f"Ollama check failed: {e}"}
+
+        return {"ok": True}
 
     def confirm_online_usage(self, provider: Optional[str] = None) -> bool:
         """
@@ -298,7 +395,7 @@ class Analyzer:
         provider: Optional[str] = None,
         on_progress: Optional[Callable] = None,
         cancel_event: Optional[asyncio.Event] = None,
-    ) -> int:
+    ) -> Tuple[int, int]:
         """
         Batch analyze images in directory
 
@@ -311,7 +408,7 @@ class Analyzer:
             cancel_event: asyncio.Event to signal cancellation
 
         Returns:
-            int: Number of successfully analyzed images
+            Tuple[int, int]: (success_count, fail_count)
         """
         # Get images to analyze
         if skip_existing:
@@ -324,7 +421,7 @@ class Analyzer:
 
         if not images:
             logger.info("No images to analyze")
-            return 0
+            return (0, 0)
 
         logger.info(f"Analyzing {len(images)} images...")
 
@@ -332,6 +429,7 @@ class Analyzer:
         delay = self.config.get("scheduler.delay_between_batches", 2)
 
         success_count = 0
+        fail_count = 0
 
         for i, image_path in enumerate(images):
             if cancel_event and cancel_event.is_set():
@@ -342,24 +440,31 @@ class Analyzer:
             if on_progress:
                 on_progress("images", i + 1, len(images), image_path.name)
 
-            result = await self.analyze_image(
-                str(image_path),
-                provider=provider,
-                save_txt=True
-            )
-
-            if result.success:
-                success_count += 1
-                logger.info(f"  Done: {result.inference_time:.2f}s")
-            else:
-                logger.warning(f"  Failed: {result.error}")
+            try:
+                result = await asyncio.wait_for(
+                    self.analyze_image(
+                        str(image_path),
+                        provider=provider,
+                        save_txt=True,
+                    ),
+                    timeout=60,
+                )
+                if result.success:
+                    success_count += 1
+                    logger.info(f"  Done: {result.inference_time:.2f}s")
+                else:
+                    fail_count += 1
+                    logger.warning(f"  Failed: {result.error}")
+            except asyncio.TimeoutError:
+                fail_count += 1
+                logger.warning(f"  Timeout analyzing {image_path.name}, skipping")
 
             # Delay between batches
             if (i + 1) % batch_size == 0 and i + 1 < len(images):
                 await asyncio.sleep(delay)
 
         logger.info(f"Complete! Success: {success_count}/{len(images)}")
-        return success_count
+        return (success_count, fail_count)
 
     async def analyze_audio(
         self,
@@ -479,6 +584,7 @@ class Analyzer:
         provider: Optional[str] = None,
         on_progress: Optional[Callable] = None,
         cancel_event: Optional[asyncio.Event] = None,
+        skip_preflight: bool = False,
     ) -> Dict[str, Any]:
         """
         Analyze all data for a specific day
@@ -491,6 +597,7 @@ class Analyzer:
             provider: LLM provider
             on_progress: Callback(stage, current, total, detail)
             cancel_event: asyncio.Event to signal cancellation
+            skip_preflight: Skip preflight check (engine layer already did it)
 
         Returns:
             Dict: Analysis statistics
@@ -502,16 +609,19 @@ class Analyzer:
             logger.error(f"Directory not found: {date_dir}")
             return {"error": f"Directory not found: {date_dir}"}
 
-        # Pre-flight check
-        if on_progress:
-            on_progress("preflight", 0, 0, "Checking LLM provider...")
-        if analyze_images or analyze_logs:
-            if not await self.preflight_check(provider):
-                return {"error": "LLM provider not ready. See above for details."}
+        # Pre-flight check (skipped when engine layer already verified)
+        if not skip_preflight:
+            if on_progress:
+                on_progress("preflight", 0, 0, "Checking LLM provider...")
+            if analyze_images or analyze_logs:
+                if not await self.preflight_check(provider):
+                    return {"error": "LLM provider not ready. See above for details."}
 
         results = {
             "date": date_str,
             "images_analyzed": 0,
+            "images_failed": 0,
+            "images_total": 0,
             "audios_transcribed": 0,
             "logs_analyzed": 0,
             "reports_generated": [],
@@ -521,13 +631,16 @@ class Analyzer:
         if analyze_images:
             if cancel_event and cancel_event.is_set():
                 return results
-            results["images_analyzed"] = await self.analyze_images_batch(
+            success, failed = await self.analyze_images_batch(
                 date_dir,
                 skip_existing=True,
                 provider=provider,
                 on_progress=on_progress,
                 cancel_event=cancel_event,
             )
+            results["images_analyzed"] = success
+            results["images_failed"] = failed
+            results["images_total"] = success + failed
 
         # Transcribe audio files
         if self.llm_router.asr_client:

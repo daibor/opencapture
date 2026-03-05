@@ -51,4 +51,4 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run tests (analysis-only, skip capture)
-        run: pytest tests/ -v --tb=short -k "not capture and not mic"
+        run: pytest tests/ -v --tb=short --ignore=tests/test_auto_capture.py --ignore=tests/test_key_logger.py --ignore=tests/test_mouse_capture.py

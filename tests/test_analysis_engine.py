@@ -19,12 +19,15 @@ def config(tmp_path, monkeypatch):
     return cfg
 
 
-def _mock_analyzer(result=None, delay=0):
+def _mock_analyzer(result=None, delay=0, preflight_ok=True):
     """Return a mock Analyzer class whose analyze_day returns *result*."""
     if result is None:
         result = {"images_analyzed": 1, "logs_analyzed": 0}
 
     mock_instance = MagicMock()
+
+    async def fake_quick_preflight(*args, **kwargs):
+        return {"ok": preflight_ok}
 
     async def fake_analyze_day(*args, **kwargs):
         if delay:
@@ -35,6 +38,7 @@ def _mock_analyzer(result=None, delay=0):
     async def fake_close():
         pass
 
+    mock_instance.quick_preflight = fake_quick_preflight
     mock_instance.analyze_day = fake_analyze_day
     mock_instance.close = fake_close
     return mock_instance
@@ -146,6 +150,9 @@ class TestProgressForwarding:
 
         mock_instance = MagicMock()
 
+        async def fake_quick_preflight(*args, **kwargs):
+            return {"ok": True}
+
         async def fake_analyze_day(*args, **kwargs):
             on_progress = kwargs.get("on_progress")
             if on_progress:
@@ -156,6 +163,7 @@ class TestProgressForwarding:
         async def fake_close():
             pass
 
+        mock_instance.quick_preflight = fake_quick_preflight
         mock_instance.analyze_day = fake_analyze_day
         mock_instance.close = fake_close
 
@@ -170,7 +178,8 @@ class TestProgressForwarding:
             )
             done.wait(timeout=5)
 
-        assert len(progress_calls) == 2
-        assert progress_calls[0] == ("images", 1, 5, "test.webp")
-        assert progress_calls[1] == ("done", 0, 0, "done")
+        assert len(progress_calls) == 3
+        assert progress_calls[0] == ("preflight", 0, 0, "Checking LLM provider...")
+        assert progress_calls[1] == ("images", 1, 5, "test.webp")
+        assert progress_calls[2] == ("done", 0, 0, "done")
         engine.stop()

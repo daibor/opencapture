@@ -81,7 +81,10 @@ class TrayAppBase(ABC):
                 images = result.get("images_analyzed", 0)
                 audios = result.get("audios_transcribed", 0)
                 logs = result.get("logs_analyzed", 0)
-                msg = f"Done: {images} images, {audios} audios, {logs} logs analyzed"
+                failed = result.get("images_failed", 0)
+                msg = f"Done — {images} images, {audios} audios, {logs} logs analyzed"
+                if failed:
+                    msg += f" ({failed} images skipped — LLM timeout)"
             else:
                 msg = str(result)
         except Exception as e:

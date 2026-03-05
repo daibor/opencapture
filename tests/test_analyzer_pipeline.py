@@ -110,11 +110,12 @@ class TestAnalyzeImagesBatch:
         with patch.object(
             analyzer.llm_router, "analyze_image", new_callable=AsyncMock,
         ) as mock_img:
-            count = await analyzer.analyze_images_batch(
+            success, failed = await analyzer.analyze_images_batch(
                 tmp_path, skip_existing=True
             )
 
-        assert count == 0
+        assert success == 0
+        assert failed == 0
         mock_img.assert_not_called()
 
     @pytest.mark.asyncio
@@ -162,12 +163,12 @@ class TestAnalyzeImagesBatch:
         with patch.object(
             analyzer, "analyze_image", side_effect=fake_analyze,
         ):
-            count = await analyzer.analyze_images_batch(
+            success, failed = await analyzer.analyze_images_batch(
                 tmp_path, skip_existing=True, cancel_event=cancel
             )
 
         # Should have processed 2 (cancel checked before 3rd)
-        assert count == 2
+        assert success == 2
 
 
 # ---------------------------------------------------------------------------

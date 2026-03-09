@@ -161,9 +161,21 @@ class TestAutoCaptureInit:
 # ---------------------------------------------------------------------------
 
 class TestAutoCaptureLifecycle:
+    """Lifecycle tests mock pynput listeners to avoid macOS HIToolbox abort
+    (Quartz Event Taps require the main-thread CFRunLoop)."""
+
+    def _patches(self, backend):
+        """Context manager that mocks both get_backend and pynput listeners."""
+        return patch.multiple(
+            "opencapture.auto_capture",
+            get_backend=MagicMock(return_value=backend),
+            keyboard=MagicMock(),
+            mouse=MagicMock(),
+        )
+
     def test_start_creates_listeners(self, tmp_path):
         backend = _mock_backend()
-        with patch("opencapture.auto_capture.get_backend", return_value=backend):
+        with self._patches(backend):
             ac = AutoCapture(storage_dir=str(tmp_path))
             ac.start()
 
@@ -176,25 +188,21 @@ class TestAutoCaptureLifecycle:
 
     def test_stop_flushes_key_logger(self, tmp_path):
         backend = _mock_backend()
-        with patch("opencapture.auto_capture.get_backend", return_value=backend):
+        with self._patches(backend):
             ac = AutoCapture(storage_dir=str(tmp_path))
-        ac.key_logger.flush = MagicMock()
-
-        with patch("opencapture.auto_capture.get_backend", return_value=backend):
+            ac.key_logger.flush = MagicMock()
             ac.start()
-        ac.stop()
+            ac.stop()
 
         ac.key_logger.flush.assert_called_once()
 
     def test_stop_waits_for_mouse_pending(self, tmp_path):
         backend = _mock_backend()
-        with patch("opencapture.auto_capture.get_backend", return_value=backend):
+        with self._patches(backend):
             ac = AutoCapture(storage_dir=str(tmp_path))
-        ac.mouse_capture.wait_for_pending = MagicMock()
-
-        with patch("opencapture.auto_capture.get_backend", return_value=backend):
+            ac.mouse_capture.wait_for_pending = MagicMock()
             ac.start()
-        ac.stop()
+            ac.stop()
 
         ac.mouse_capture.wait_for_pending.assert_called_once()
 

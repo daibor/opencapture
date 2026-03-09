@@ -243,8 +243,8 @@ class TestCaptureAndSave:
         logs = list(tmp_path.rglob("*.log"))
         assert len(logs) == 1
         text = logs[0].read_text()
-        assert "click" in text
-        assert "(100,200)" in text
+        assert "click_" in text
+        assert "x100_y200.webp" in text
 
     def test_filename_format_drag(self, tmp_path, key_logger):
         mc = MouseCapture(tmp_path, key_logger)
@@ -271,8 +271,8 @@ class TestCaptureAndSave:
 
         logs = list(tmp_path.rglob("*.log"))
         text = logs[0].read_text()
-        assert "drag" in text
-        assert "(10,20)->(30,40)" in text
+        assert "drag_" in text
+        assert "x10_y20_to_x30_y40.webp" in text
 
 
 # ---------------------------------------------------------------------------

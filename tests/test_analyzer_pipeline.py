@@ -189,7 +189,7 @@ class TestAnalyzeDay:
             f"[{date_str} 10:00:00] VS Code | main.py (com.microsoft.VSCode)\n"
             f"[10:00:01] ⌨️ print('hello')\n"
         )
-        (date_dir / f"{date_str}.log").write_text(log_content)
+        (date_dir / f"{date_str}.log").write_text(log_content, encoding="utf-8")
 
         return date_dir
 

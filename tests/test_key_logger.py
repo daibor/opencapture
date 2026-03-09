@@ -222,8 +222,7 @@ class TestLogScreenshot:
 
         text = _read_log(tmp_path)
         assert "\U0001f4f7" in text  # 📷
-        assert "click" in text
-        assert "(100,200)" in text
+        assert "click_120000_001_left_x100_y200.webp" in text
 
     def test_drag_entry(self, logger, tmp_path):
         _set_window(logger)
@@ -231,7 +230,7 @@ class TestLogScreenshot:
                               "drag", 10, 20, x2=30, y2=40)
 
         text = _read_log(tmp_path)
-        assert "(10,20)->(30,40)" in text
+        assert "drag_120000_001_left_x10_y20_to_x30_y40.webp" in text
 
     def test_screenshot_writes_header_on_new_app(self, logger, tmp_path):
         _set_window(logger, app="Chrome")

@@ -1,38 +1,14 @@
 """Tests for CaptureEngine and AnalysisEngine (engine.py)."""
 
-import time
 import threading
 from pathlib import Path
 from datetime import datetime
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from opencapture.config import Config
 from opencapture.engine import CaptureEngine, AnalysisEngine
-
-try:
-    import pynput  # noqa: F401
-    HAS_PYNPUT = True
-except ImportError:
-    HAS_PYNPUT = False
-
-
-def _mock_backend(window_info=("App", "", "com.test")):
-    """Create a mock PlatformBackend."""
-    backend = MagicMock()
-    backend.get_active_window_info.return_value = window_info
-    backend.get_window_at_point.return_value = window_info
-    backend.get_active_window_bounds.return_value = None
-    backend.check_accessibility.return_value = True
-    backend.get_key_symbols.return_value = {}
-    def _start_observer(callback):
-        callback(*window_info)
-    backend.start_window_observer.side_effect = _start_observer
-    backend.stop_window_observer.return_value = None
-    backend.run_event_loop.return_value = None
-    return backend
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -108,32 +84,40 @@ class TestCaptureEngineEvents:
 # CaptureEngine — start / stop lifecycle
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_PYNPUT, reason="pynput unavailable (no display)")
 class TestCaptureEngineLifecycle:
     def test_start_stop(self, config):
-        backend = _mock_backend()
         engine = CaptureEngine(config)
         status_events = []
         engine.subscribe("status", lambda t, d: status_events.append(d))
 
-        with patch("opencapture.auto_capture.get_backend", return_value=backend):
+        with patch("opencapture.auto_capture.AutoCapture") as MockAC:
+            mock_capture = MagicMock()
+            MockAC.return_value = mock_capture
+
             result = engine.start()
 
-        assert result is None  # no error
+            MockAC.assert_called_once()
+            call_kwargs = MockAC.call_args[1]
+            assert "storage_dir" in call_kwargs
+            assert "on_event" in call_kwargs
+            mock_capture.start.assert_called_once()
+
+        assert result is None
         assert engine.is_running is True
         assert {"state": "started"} in status_events
 
         engine.stop()
+        mock_capture.stop.assert_called_once()
         assert engine.is_running is False
         assert {"state": "stopped"} in status_events
 
     def test_double_start_is_noop(self, config):
-        backend = _mock_backend()
         engine = CaptureEngine(config)
-        with patch("opencapture.auto_capture.get_backend", return_value=backend):
+        with patch("opencapture.auto_capture.AutoCapture") as MockAC:
+            MockAC.return_value = MagicMock()
             engine.start()
-            result = engine.start()  # second start
-        assert result is None
+            engine.start()  # second start
+            MockAC.assert_called_once()
         engine.stop()
 
     def test_stop_without_start(self, config):
@@ -198,7 +182,7 @@ class TestCaptureEngineStatus:
 
 class TestCheckAccessibility:
     def test_delegates_to_backend(self, config):
-        backend = _mock_backend()
+        backend = MagicMock()
         backend.check_accessibility.return_value = True
         with patch("opencapture.platform.get_backend", return_value=backend):
             assert CaptureEngine.check_accessibility() is True

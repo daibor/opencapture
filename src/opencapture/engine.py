@@ -184,6 +184,14 @@ class AnalysisEngine:
             self._thread.join(timeout=5)
             self._thread = None
         if self._loop:
+            # Cancel pending tasks to avoid "Task was destroyed" warnings
+            pending = [t for t in asyncio.all_tasks(self._loop) if not t.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                self._loop.run_until_complete(
+                    asyncio.gather(*pending, return_exceptions=True)
+                )
             self._loop.close()
             self._loop = None
 

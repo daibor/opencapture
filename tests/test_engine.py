@@ -1,8 +1,10 @@
 """Tests for CaptureEngine and AnalysisEngine (engine.py)."""
 
+import sys
 import threading
 from pathlib import Path
 from datetime import datetime
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -84,23 +86,34 @@ class TestCaptureEngineEvents:
 # CaptureEngine — start / stop lifecycle
 # ---------------------------------------------------------------------------
 
+def _fake_auto_capture_module(mock_cls):
+    """Create a fake opencapture.auto_capture module with mock_cls as AutoCapture.
+
+    This avoids importing the real auto_capture module, which requires pynput.
+    """
+    mod = ModuleType("opencapture.auto_capture")
+    mod.AutoCapture = mock_cls
+    return mod
+
+
 class TestCaptureEngineLifecycle:
     def test_start_stop(self, config):
         engine = CaptureEngine(config)
         status_events = []
         engine.subscribe("status", lambda t, d: status_events.append(d))
 
-        with patch("opencapture.auto_capture.AutoCapture") as MockAC:
-            mock_capture = MagicMock()
-            MockAC.return_value = mock_capture
+        MockAC = MagicMock()
+        mock_capture = MagicMock()
+        MockAC.return_value = mock_capture
 
+        with patch.dict(sys.modules, {"opencapture.auto_capture": _fake_auto_capture_module(MockAC)}):
             result = engine.start()
 
-            MockAC.assert_called_once()
-            call_kwargs = MockAC.call_args[1]
-            assert "storage_dir" in call_kwargs
-            assert "on_event" in call_kwargs
-            mock_capture.start.assert_called_once()
+        MockAC.assert_called_once()
+        call_kwargs = MockAC.call_args[1]
+        assert "storage_dir" in call_kwargs
+        assert "on_event" in call_kwargs
+        mock_capture.start.assert_called_once()
 
         assert result is None
         assert engine.is_running is True
@@ -113,8 +126,9 @@ class TestCaptureEngineLifecycle:
 
     def test_double_start_is_noop(self, config):
         engine = CaptureEngine(config)
-        with patch("opencapture.auto_capture.AutoCapture") as MockAC:
-            MockAC.return_value = MagicMock()
+        MockAC = MagicMock()
+        MockAC.return_value = MagicMock()
+        with patch.dict(sys.modules, {"opencapture.auto_capture": _fake_auto_capture_module(MockAC)}):
             engine.start()
             engine.start()  # second start
             MockAC.assert_called_once()
@@ -129,8 +143,9 @@ class TestCaptureEngineLifecycle:
         status_events = []
         engine.subscribe("status", lambda t, d: status_events.append(d))
 
-        with patch("opencapture.auto_capture.AutoCapture") as MockAC:
-            MockAC.side_effect = RuntimeError("permission denied")
+        MockAC = MagicMock()
+        MockAC.side_effect = RuntimeError("permission denied")
+        with patch.dict(sys.modules, {"opencapture.auto_capture": _fake_auto_capture_module(MockAC)}):
             result = engine.start()
 
         assert result is not None

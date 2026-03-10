@@ -200,6 +200,39 @@ class _AppDelegate(AppKit.NSObject):
         )
         self._updateStatusLine()
 
+        # Deferred permission check at launch
+        self.performSelector_withObject_afterDelay_(
+            "checkPermissionsOnLaunch:", None, 0.5
+        )
+
+    @objc.typedSelector(b"v@:@")
+    def checkPermissionsOnLaunch_(self, sender):
+        from ..onboarding import (
+            is_first_run, mark_setup_complete,
+            get_gui_welcome, get_permission_message, get_setup_complete_message,
+        )
+
+        first_run = is_first_run()
+        if first_run:
+            self._trayApp.show_alert("Welcome", get_gui_welcome())
+
+        # Check Accessibility
+        if not CaptureEngine.check_accessibility(prompt=False):
+            CaptureEngine.check_accessibility(prompt=True)
+            title, body = get_permission_message("accessibility")
+            self._trayApp.show_alert(title, body)
+
+        # Check Screen Recording
+        if not CaptureEngine.check_screen_recording(prompt=False):
+            CaptureEngine.check_screen_recording(prompt=True)
+            title, body = get_permission_message("screen_recording")
+            self._trayApp.show_alert(title, body)
+
+        if first_run:
+            mark_setup_complete()
+            title, body = get_setup_complete_message()
+            self._trayApp.show_alert(title, body)
+
     def applicationWillTerminate_(self, notification):
         if self._statusTimer:
             self._statusTimer.invalidate()
@@ -357,13 +390,19 @@ class MacOSTrayApp(TrayAppBase):
         self._delegate._statusLineItem.setTitle_(text)
 
     def check_capture_permissions(self) -> bool:
+        from .base import TrayAppBase  # noqa: F811 — local re-import for clarity
+        from ..onboarding import get_permission_message
+
         if not CaptureEngine.check_accessibility(prompt=False):
             CaptureEngine.check_accessibility(prompt=True)
-            self.show_alert(
-                "Accessibility Permission Required",
-                "Grant OpenCapture access in System Settings > "
-                "Privacy & Security > Accessibility, then click OK.",
-            )
+            title, body = get_permission_message("accessibility")
+            self.show_alert(title, body)
             if not CaptureEngine.check_accessibility(prompt=False):
                 return False
+
+        if not CaptureEngine.check_screen_recording(prompt=False):
+            CaptureEngine.check_screen_recording(prompt=True)
+            title, body = get_permission_message("screen_recording")
+            self.show_alert(title, body)
+
         return True

@@ -225,3 +225,81 @@ class TestAccessibilityCheck:
         with patch("opencapture.auto_capture.get_backend", return_value=backend):
             AutoCapture._check_accessibility(prompt=True)
             backend.check_accessibility.assert_called_with(prompt=True)
+
+
+# ---------------------------------------------------------------------------
+# AutoCapture - listener validation on start
+# ---------------------------------------------------------------------------
+
+class TestListenerValidation:
+    """Verify that AutoCapture.start() detects dead listeners."""
+
+    def test_keyboard_listener_failure_raises(self, tmp_path):
+        backend = _mock_backend()
+        mock_keyboard = MagicMock()
+        mock_mouse = MagicMock()
+
+        # Keyboard listener dies immediately (is_alive returns False)
+        mock_kb_listener = MagicMock()
+        mock_kb_listener.is_alive.return_value = False
+        mock_keyboard.Listener.return_value = mock_kb_listener
+
+        with patch.multiple(
+            "opencapture.auto_capture",
+            get_backend=MagicMock(return_value=backend),
+            keyboard=mock_keyboard,
+            mouse=mock_mouse,
+        ):
+            ac = AutoCapture(storage_dir=str(tmp_path))
+            with pytest.raises(RuntimeError, match="Keyboard listener failed"):
+                ac.start()
+
+    def test_mouse_listener_failure_raises(self, tmp_path):
+        backend = _mock_backend()
+        mock_keyboard = MagicMock()
+        mock_mouse = MagicMock()
+
+        # Keyboard listener succeeds
+        mock_kb_listener = MagicMock()
+        mock_kb_listener.is_alive.return_value = True
+        mock_keyboard.Listener.return_value = mock_kb_listener
+
+        # Mouse listener dies immediately
+        mock_mouse_listener = MagicMock()
+        mock_mouse_listener.is_alive.return_value = False
+        mock_mouse.Listener.return_value = mock_mouse_listener
+
+        with patch.multiple(
+            "opencapture.auto_capture",
+            get_backend=MagicMock(return_value=backend),
+            keyboard=mock_keyboard,
+            mouse=mock_mouse,
+        ):
+            ac = AutoCapture(storage_dir=str(tmp_path))
+            with pytest.raises(RuntimeError, match="Mouse listener failed"):
+                ac.start()
+
+    def test_successful_start_with_validation(self, tmp_path):
+        backend = _mock_backend()
+        mock_keyboard = MagicMock()
+        mock_mouse = MagicMock()
+
+        # Both listeners stay alive
+        mock_kb_listener = MagicMock()
+        mock_kb_listener.is_alive.return_value = True
+        mock_keyboard.Listener.return_value = mock_kb_listener
+
+        mock_mouse_listener = MagicMock()
+        mock_mouse_listener.is_alive.return_value = True
+        mock_mouse.Listener.return_value = mock_mouse_listener
+
+        with patch.multiple(
+            "opencapture.auto_capture",
+            get_backend=MagicMock(return_value=backend),
+            keyboard=mock_keyboard,
+            mouse=mock_mouse,
+        ):
+            ac = AutoCapture(storage_dir=str(tmp_path))
+            ac.start()  # Should not raise
+            assert ac._running is True
+            ac.stop()

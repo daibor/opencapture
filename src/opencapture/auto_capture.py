@@ -508,11 +508,25 @@ class AutoCapture:
             on_press=self.key_logger.on_key_press
         )
         self._keyboard_listener.start()
+        self._keyboard_listener.join(timeout=1.0)
+        if not self._keyboard_listener.is_alive():
+            raise RuntimeError(
+                "Keyboard listener failed to start. "
+                "If you just granted Accessibility permission, "
+                "please restart the app for it to take effect."
+            )
 
         self._mouse_listener = mouse.Listener(
             on_click=self.mouse_capture.on_click
         )
         self._mouse_listener.start()
+        self._mouse_listener.join(timeout=1.0)
+        if not self._mouse_listener.is_alive():
+            raise RuntimeError(
+                "Mouse listener failed to start. "
+                "If you just granted Accessibility permission, "
+                "please restart the app for it to take effect."
+            )
 
         if self.mic_capture:
             self.mic_capture.start()

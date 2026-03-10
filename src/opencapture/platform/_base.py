@@ -52,6 +52,16 @@ class PlatformBackend(ABC):
             True if permission is granted.
         """
 
+    def check_screen_recording(self, prompt: bool = False) -> bool:
+        """Check if the process has screen recording permissions.
+
+        Args:
+            prompt: If True, open System Settings to grant permission (macOS only).
+        Returns:
+            True if permission is granted.
+        """
+        return True
+
     # ── Event loop ───────────────────────────────────────────
 
     @abstractmethod

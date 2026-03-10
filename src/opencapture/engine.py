@@ -137,6 +137,20 @@ class CaptureEngine:
         return get_backend().check_accessibility(prompt=prompt)
 
 
+    @staticmethod
+    def check_screen_recording(prompt=False) -> bool:
+        """Check platform screen recording permission.
+
+        On macOS: checks Screen Recording permission via CGPreflight/CGRequest.
+        On other platforms: always returns True.
+
+        Args:
+            prompt: If True, open System Settings on macOS.
+        """
+        from .platform import get_backend
+        return get_backend().check_screen_recording(prompt=prompt)
+
+
 class AnalysisEngine:
     """Runs analysis tasks in a background asyncio event loop.
 

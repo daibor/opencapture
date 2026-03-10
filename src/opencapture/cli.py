@@ -157,6 +157,12 @@ def run_capture(args):
             sys.exit(1)
         print("[OpenCapture] Accessibility permission granted!")
 
+    # Check screen recording permission
+    if not backend.check_screen_recording(prompt=False):
+        backend.check_screen_recording(prompt=True)
+        print("[OpenCapture] Screen Recording permission is needed for screenshots.")
+        print("[OpenCapture] Grant access in System Settings > Privacy & Security > Screen Recording")
+
     error = engine.start()
     if error:
         print(f"[OpenCapture] Failed to start: {error}")

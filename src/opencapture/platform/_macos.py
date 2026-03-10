@@ -198,6 +198,22 @@ class MacOSBackend(PlatformBackend):
         except Exception:
             return True
 
+    def check_screen_recording(self, prompt: bool = False) -> bool:
+        try:
+            import ctypes as _ct
+            cg = _ct.cdll.LoadLibrary(
+                '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
+            )
+            if prompt:
+                cg.CGRequestScreenCaptureAccess.restype = _ct.c_bool
+                return cg.CGRequestScreenCaptureAccess()
+            else:
+                cg.CGPreflightScreenCaptureAccess.restype = _ct.c_bool
+                return cg.CGPreflightScreenCaptureAccess()
+        except (AttributeError, OSError):
+            # macOS < 10.15 or missing framework — assume granted
+            return True
+
     # ── Event loop ───────────────────────────────────────────
 
     def run_event_loop(self, should_run: Callable[[], bool]):

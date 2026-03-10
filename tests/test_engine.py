@@ -203,6 +203,22 @@ class TestCheckAccessibility:
             assert CaptureEngine.check_accessibility() is True
 
 
+class TestCheckScreenRecording:
+    def test_delegates_to_backend(self, config):
+        backend = MagicMock()
+        backend.check_screen_recording.return_value = True
+        with patch("opencapture.platform.get_backend", return_value=backend):
+            assert CaptureEngine.check_screen_recording() is True
+            backend.check_screen_recording.assert_called_with(prompt=False)
+
+    def test_prompt_passed_through(self, config):
+        backend = MagicMock()
+        backend.check_screen_recording.return_value = False
+        with patch("opencapture.platform.get_backend", return_value=backend):
+            assert CaptureEngine.check_screen_recording(prompt=True) is False
+            backend.check_screen_recording.assert_called_with(prompt=True)
+
+
 # ---------------------------------------------------------------------------
 # AnalysisEngine — background loop lifecycle
 # ---------------------------------------------------------------------------

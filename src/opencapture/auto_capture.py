@@ -140,6 +140,7 @@ class KeyLogger:
                        window_info=None):
         """Log screenshot event."""
         with self._lock:
+            self._flush_line()
             if window_info:
                 self._update_window_state(window_info)
             self._ensure_app_header()
@@ -173,6 +174,7 @@ class KeyLogger:
     def log_mic_event(self, event_type: str, detail: str, timestamp: str = None):
         """Log microphone event."""
         with self._lock:
+            self._flush_line()
             if timestamp is None:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

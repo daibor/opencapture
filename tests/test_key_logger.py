@@ -362,3 +362,45 @@ class TestLogFileStructure:
         # Log file named YYYY-MM-DD.log
         import re
         assert re.match(r"\d{4}-\d{2}-\d{2}\.log", log_files[0].name)
+
+
+# ---------------------------------------------------------------------------
+# Timestamp ordering — keyboard buffer flushed before screenshot/mic
+# ---------------------------------------------------------------------------
+
+class TestTimestampOrdering:
+    def test_keyboard_flushed_before_screenshot(self, logger, tmp_path):
+        """Buffered keyboard line must appear before the screenshot line."""
+        _set_window(logger)
+        # Accumulate some keys (not yet flushed to disk)
+        for ch in "abc":
+            logger.on_key_press(KeyCode.from_char(ch))
+
+        # Screenshot should flush the pending keyboard buffer first
+        logger.log_screenshot("click_120000_001_left_x50_y50.webp", "click", 50, 50)
+
+        text = _read_log(tmp_path)
+        kb_pos = text.find("\u2328\ufe0f")   # ⌨️
+        ss_pos = text.find("\U0001f4f7")      # 📷
+        assert kb_pos != -1, "keyboard line missing"
+        assert ss_pos != -1, "screenshot line missing"
+        assert kb_pos < ss_pos, (
+            f"keyboard (pos {kb_pos}) should come before screenshot (pos {ss_pos})"
+        )
+
+    def test_keyboard_flushed_before_mic_event(self, logger, tmp_path):
+        """Buffered keyboard line must appear before the mic event line."""
+        _set_window(logger)
+        for ch in "xyz":
+            logger.on_key_press(KeyCode.from_char(ch))
+
+        logger.log_mic_event("mic_start", "FaceTime", timestamp="2026-01-01 10:00:00")
+
+        text = _read_log(tmp_path)
+        kb_pos = text.find("\u2328\ufe0f")   # ⌨️
+        mic_pos = text.find("\U0001f3a4")     # 🎤
+        assert kb_pos != -1, "keyboard line missing"
+        assert mic_pos != -1, "mic line missing"
+        assert kb_pos < mic_pos, (
+            f"keyboard (pos {kb_pos}) should come before mic (pos {mic_pos})"
+        )

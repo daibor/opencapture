@@ -6,10 +6,10 @@ the capture/analysis orchestration that is identical across platforms.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
 from pathlib import Path
 
 from ..config import Config
+from ..date_resolver import DateResolver
 from ..engine import CaptureEngine, AnalysisEngine
 
 
@@ -113,7 +113,8 @@ class TrayAppBase(ABC):
                 "capture.output_dir", str(Path.home() / "opencapture")
             )
         ).expanduser()
-        today = datetime.now().strftime("%Y-%m-%d")
+        day_start_hour = self.config.get("capture.day_start_hour", 4)
+        today = DateResolver.compute_base_date(day_start_hour=day_start_hour)
         return data_dir / today / f"{today}.log"
 
     def shutdown(self):

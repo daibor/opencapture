@@ -33,6 +33,8 @@ class Config:
             "mic_channels": 1,
             "mic_start_debounce_ms": 500,
             "mic_stop_debounce_ms": 2000,
+            "day_start_hour": 4,
+            "inactivity_threshold_minutes": 180,
         },
 
         # LLM configuration

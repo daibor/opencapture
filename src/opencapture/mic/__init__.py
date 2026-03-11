@@ -16,6 +16,7 @@ def create_mic_capture(
     storage_dir: Path,
     key_logger,
     mic_config: Optional[dict] = None,
+    date_resolver=None,
 ) -> Optional[MicCaptureBase]:
     """Create a platform-appropriate mic capture instance.
 
@@ -34,6 +35,7 @@ def create_mic_capture(
                 channels=cfg.get("mic_channels", 1),
                 min_duration_ms=cfg.get("mic_min_duration_ms", cfg.get("mic_start_debounce_ms", 500)),
                 stop_debounce_ms=cfg.get("mic_stop_debounce_ms", 300),
+                date_resolver=date_resolver,
             )
         except ImportError as e:
             print(f"[MicCapture] Unavailable (missing dependency): {e}")

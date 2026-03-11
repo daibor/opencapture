@@ -353,9 +353,11 @@ class MacOSMicCapture(MicCaptureBase):
         channels: int = 1,
         min_duration_ms: int = 500,
         stop_debounce_ms: int = 300,
+        date_resolver=None,
     ):
         self.storage_dir = storage_dir
         self.key_logger = key_logger
+        self.date_resolver = date_resolver
         self.sample_rate = sample_rate
         self.channels = channels
         self.min_duration_ms = min_duration_ms
@@ -702,7 +704,10 @@ class MacOSMicCapture(MicCaptureBase):
     # ── Recording ────────────────────────────────────────────
 
     def _get_day_dir(self) -> Path:
-        today = datetime.now().strftime("%Y-%m-%d")
+        if self.date_resolver:
+            today = self.date_resolver.get_logical_date()
+        else:
+            today = datetime.now().strftime("%Y-%m-%d")
         day_dir = self.storage_dir / today
         day_dir.mkdir(parents=True, exist_ok=True)
         return day_dir

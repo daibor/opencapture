@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .config import Config
+from .date_resolver import DateResolver
 
 
 class CaptureEngine:
@@ -28,6 +29,13 @@ class CaptureEngine:
         self._capture = None  # AutoCapture instance
         self._subscribers: list[tuple[str, Callable]] = []
         self._running = False
+
+        capture_cfg = config.get_capture_config()
+        self._date_resolver = DateResolver(
+            day_start_hour=capture_cfg.get("day_start_hour", 4),
+            inactivity_threshold_minutes=capture_cfg.get("inactivity_threshold_minutes", 180),
+        )
+        self._day_start_hour = capture_cfg.get("day_start_hour", 4)
 
     def subscribe(self, event_type: str, callback: Callable):
         """Subscribe to capture events.
@@ -69,6 +77,7 @@ class CaptureEngine:
                 mic_enabled=capture_config.get("mic_enabled", False),
                 mic_config=capture_config,
                 on_event=self._emit,
+                date_resolver=self._date_resolver,
             )
             self._capture.start()
         except Exception as e:
@@ -103,7 +112,7 @@ class CaptureEngine:
         output_dir = Path(
             self._config.get("capture.output_dir", str(Path.home() / "opencapture"))
         ).expanduser()
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = DateResolver.compute_base_date(day_start_hour=self._day_start_hour)
         today_dir = output_dir / today
 
         result = {
@@ -164,6 +173,7 @@ class AnalysisEngine:
         self._thread: Optional[threading.Thread] = None
         self._analyzing = False
         self._cancel_event: Optional[asyncio.Event] = None
+        self._day_start_hour = config.get("capture.day_start_hour", 4)
 
     @property
     def is_analyzing(self) -> bool:
@@ -264,7 +274,9 @@ class AnalysisEngine:
                     return {"error": preflight["error"]}
 
                 # Phase 2: run analysis (no global timeout)
-                date_str = datetime.now().strftime("%Y-%m-%d")
+                date_str = DateResolver.compute_base_date(
+                    day_start_hour=self._day_start_hour
+                )
                 return await analyzer.analyze_day(
                     date_str,
                     generate_reports=True,

@@ -19,6 +19,10 @@ capture:
   mic_min_duration_ms: 500            # Discard recordings shorter than this (ms)
   mic_stop_debounce_ms: 300           # Wait before stopping recording (ms)
 
+  # Smart day boundary: sessions spanning midnight stay in one day
+  day_start_hour: 4                   # Hour (0-23) when a new logical day begins
+  inactivity_threshold_minutes: 180   # Minutes of inactivity before allowing day switch
+
 # ============================================================
 # LLM Configuration
 # ============================================================

@@ -14,6 +14,7 @@ from typing import Callable, Dict, Any, Optional, List, Tuple
 import aiohttp
 
 from .config import Config, get_config
+from .date_resolver import DateResolver
 from .llm_client import LLMRouter, AnalysisResult
 from .report_generator import (
     ReportGenerator,
@@ -50,6 +51,7 @@ class Analyzer:
             self.report_generator,
             self.llm_router
         )
+        self._day_start_hour = self.config.get("capture.day_start_hour", 4)
 
     async def close(self):
         """Close all underlying LLM client sessions"""
@@ -133,7 +135,7 @@ class Analyzer:
         provider = provider or self.config.get_default_provider()
 
         # 1. Check today's data directory
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = DateResolver.compute_base_date(day_start_hour=self._day_start_hour)
         date_dir = self.config.get_output_dir() / today
         if not date_dir.exists():
             return {"ok": False, "error": "No data for today. Start capture first."}
@@ -602,7 +604,9 @@ class Analyzer:
         Returns:
             Dict: Analysis statistics
         """
-        date_str = date_str or datetime.now().strftime("%Y-%m-%d")
+        date_str = date_str or DateResolver.compute_base_date(
+            day_start_hour=self._day_start_hour
+        )
         date_dir = self.config.get_output_dir() / date_str
 
         if not date_dir.exists():
@@ -694,7 +698,7 @@ class Analyzer:
     async def analyze_today(self, **kwargs) -> Dict[str, Any]:
         """Analyze today's data"""
         return await self.analyze_day(
-            datetime.now().strftime("%Y-%m-%d"),
+            DateResolver.compute_base_date(day_start_hour=self._day_start_hour),
             **kwargs
         )
 
@@ -816,7 +820,9 @@ async def main():
         return
 
     # Analyze specific date
-    date_str = args.date or datetime.now().strftime("%Y-%m-%d")
+    date_str = args.date or DateResolver.compute_base_date(
+        day_start_hour=config.get("capture.day_start_hour", 4)
+    )
     print(f"\nAnalyzing date: {date_str}")
 
     results = await analyzer.analyze_day(

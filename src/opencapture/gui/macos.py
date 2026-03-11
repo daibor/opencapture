@@ -8,9 +8,9 @@ and NSAlert for dialogs. Preserves full native macOS experience.
 import objc
 import AppKit
 import Foundation
-from datetime import datetime
 from pathlib import Path
 
+from ..date_resolver import DateResolver
 from ..engine import CaptureEngine
 from .base import TrayAppBase
 
@@ -93,7 +93,7 @@ class LogWindowController(AppKit.NSObject):
         return self
 
     def _logPath(self):
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = DateResolver.compute_base_date()
         return Path(self._logDir) / today / f"{today}.log"
 
     def _textAttrs(self):

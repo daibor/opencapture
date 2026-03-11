@@ -67,7 +67,7 @@ def cmd_restart():
 
 def cmd_status():
     """Show service status and today's stats."""
-    from datetime import datetime
+    from opencapture.date_resolver import DateResolver
     from opencapture.service import get_service_manager
 
     print()
@@ -89,7 +89,7 @@ def cmd_status():
     data_dir = Path.home() / "opencapture"
     print(f"  Data:       {data_dir}")
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = DateResolver.compute_base_date()
     today_dir = data_dir / today
     if today_dir.exists():
         screenshots = len(list(today_dir.glob("*.webp")))
@@ -236,13 +236,16 @@ async def _run_analyze_inner(analyzer, args, config):
 
     # Analyze specific date
     from datetime import datetime, timedelta
+    from opencapture.date_resolver import DateResolver
 
     date_str = args.date
+    day_start_hour = config.get("capture.day_start_hour", 4)
 
     if date_str == "today":
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = DateResolver.compute_base_date(day_start_hour=day_start_hour)
     elif date_str == "yesterday":
-        date_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        today = DateResolver.compute_base_date(day_start_hour=day_start_hour)
+        date_str = (datetime.strptime(today, "%Y-%m-%d") - timedelta(days=1)).strftime("%Y-%m-%d")
 
     provider = args.provider or config.get_default_provider()
 

@@ -66,8 +66,9 @@ class KeyLogger:
     _current_window_title: str = ""
     _current_bundle_id: str = ""
 
-    def __init__(self, storage_dir: Path, on_event=None):
+    def __init__(self, storage_dir: Path, on_event=None, date_resolver=None):
         self.storage_dir = storage_dir
+        self.date_resolver = date_resolver
         self.current_line = ""
         self.last_key_time: Optional[float] = None
         self.line_start_time: Optional[datetime] = None
@@ -85,7 +86,10 @@ class KeyLogger:
         self._last_header_app = ""
 
     def _get_log_file(self) -> Path:
-        today = datetime.now().strftime("%Y-%m-%d")
+        if self.date_resolver:
+            today = self.date_resolver.get_logical_date()
+        else:
+            today = datetime.now().strftime("%Y-%m-%d")
         day_dir = self.storage_dir / today
         day_dir.mkdir(parents=True, exist_ok=True)
         return day_dir / f"{today}.log"
@@ -236,9 +240,11 @@ class MouseCapture:
     IMAGE_FORMAT = "webp"
     IMAGE_QUALITY = 80
 
-    def __init__(self, storage_dir: Path, key_logger: Optional['KeyLogger'] = None):
+    def __init__(self, storage_dir: Path, key_logger: Optional['KeyLogger'] = None,
+                 date_resolver=None):
         self.storage_dir = storage_dir
         self.key_logger = key_logger
+        self.date_resolver = date_resolver
         self._lock = threading.Lock()
 
         self._press_time: float = 0
@@ -257,7 +263,10 @@ class MouseCapture:
         self._active_threads: list[threading.Thread] = []
 
     def _get_day_dir(self) -> Path:
-        today = datetime.now().strftime("%Y-%m-%d")
+        if self.date_resolver:
+            today = self.date_resolver.get_logical_date()
+        else:
+            today = datetime.now().strftime("%Y-%m-%d")
         day_dir = self.storage_dir / today
         day_dir.mkdir(parents=True, exist_ok=True)
         return day_dir
@@ -472,16 +481,19 @@ class AutoCapture:
     """Main capture controller."""
 
     def __init__(self, storage_dir: Optional[str] = None, mic_enabled: bool = False,
-                 mic_config: Optional[dict] = None, on_event=None):
+                 mic_config: Optional[dict] = None, on_event=None, date_resolver=None):
         if storage_dir:
             self.storage_dir = Path(storage_dir).expanduser()
         else:
             self.storage_dir = Path.home() / "opencapture"
 
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.date_resolver = date_resolver
 
-        self.key_logger = KeyLogger(self.storage_dir, on_event=on_event)
-        self.mouse_capture = MouseCapture(self.storage_dir, self.key_logger)
+        self.key_logger = KeyLogger(self.storage_dir, on_event=on_event,
+                                    date_resolver=date_resolver)
+        self.mouse_capture = MouseCapture(self.storage_dir, self.key_logger,
+                                          date_resolver=date_resolver)
         self.window_tracker = WindowTracker(self.key_logger.on_window_activated)
         self.mic_capture = None
 
@@ -491,6 +503,7 @@ class AutoCapture:
                 storage_dir=self.storage_dir,
                 key_logger=self.key_logger,
                 mic_config=mic_config,
+                date_resolver=date_resolver,
             )
 
         self._keyboard_listener: Optional[keyboard.Listener] = None

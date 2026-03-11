@@ -162,7 +162,13 @@ class KeyLogger:
                 self._on_event("screenshot", {"filename": filename, "action": action, "x": x, "y": y})
 
     def on_window_activated(self, app_name: str, window_title: str, bundle_id: str):
-        """Window activation callback from WindowTracker."""
+        """Window activation callback from WindowTracker.
+
+        The header is NOT written here — it is deferred until actual
+        activity (keyboard / screenshot / mic) occurs, so windows the
+        user merely passes through without any interaction are never
+        recorded.
+        """
         with self._lock:
             if app_name != self._current_app_name:
                 self._flush_line()
@@ -170,7 +176,6 @@ class KeyLogger:
             self._current_app_name = app_name
             self._current_window_title = window_title
             self._current_bundle_id = bundle_id
-            self._ensure_app_header()
 
             if self._on_event:
                 self._on_event("window", {"app": app_name, "title": window_title, "bundle_id": bundle_id})
@@ -179,6 +184,7 @@ class KeyLogger:
         """Log microphone event."""
         with self._lock:
             self._flush_line()
+            self._ensure_app_header()
             if timestamp is None:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 

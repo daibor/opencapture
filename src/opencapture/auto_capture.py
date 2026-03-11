@@ -162,13 +162,7 @@ class KeyLogger:
                 self._on_event("screenshot", {"filename": filename, "action": action, "x": x, "y": y})
 
     def on_window_activated(self, app_name: str, window_title: str, bundle_id: str):
-        """Window activation callback from WindowTracker.
-
-        The header is NOT written here — it is deferred until actual
-        activity (keyboard / screenshot / mic) occurs, so windows the
-        user merely passes through without any interaction are never
-        recorded.
-        """
+        """Window activation callback from WindowTracker."""
         with self._lock:
             if app_name != self._current_app_name:
                 self._flush_line()
@@ -176,6 +170,7 @@ class KeyLogger:
             self._current_app_name = app_name
             self._current_window_title = window_title
             self._current_bundle_id = bundle_id
+            self._ensure_app_header()
 
             if self._on_event:
                 self._on_event("window", {"app": app_name, "title": window_title, "bundle_id": bundle_id})
@@ -344,7 +339,9 @@ class MouseCapture:
             ms = now.strftime("%f")[:3]
             ext = self.IMAGE_FORMAT
 
-            if action == "drag":
+            if action == "focus":
+                filename = f"focus_{timestamp}_{ms}.{ext}"
+            elif action == "drag":
                 filename = f"drag_{timestamp}_{ms}_{button}_x{x1}_y{y1}_to_x{x2}_y{y2}.{ext}"
             elif action == "dblclick":
                 filename = f"dblclick_{timestamp}_{ms}_{button}_x{x1}_y{y1}.{ext}"
@@ -399,6 +396,18 @@ class MouseCapture:
                 args=(action, button_name, x1, y1),
                 kwargs={"window_info": window_info},
             )
+        thread.start()
+        with self._lock:
+            self._active_threads.append(thread)
+            self._active_threads = [t for t in self._active_threads if t.is_alive()]
+
+    def capture_focus(self, window_info=None):
+        """Capture screenshot on window focus change (no mouse coords)."""
+        thread = threading.Thread(
+            target=self._capture_and_save,
+            args=("focus", "", 0, 0),
+            kwargs={"window_info": window_info},
+        )
         thread.start()
         with self._lock:
             self._active_threads.append(thread)
@@ -500,7 +509,7 @@ class AutoCapture:
                                     date_resolver=date_resolver)
         self.mouse_capture = MouseCapture(self.storage_dir, self.key_logger,
                                           date_resolver=date_resolver)
-        self.window_tracker = WindowTracker(self.key_logger.on_window_activated)
+        self.window_tracker = WindowTracker(self._on_window_change)
         self.mic_capture = None
 
         if mic_enabled:
@@ -515,6 +524,15 @@ class AutoCapture:
         self._keyboard_listener: Optional[keyboard.Listener] = None
         self._mouse_listener: Optional[mouse.Listener] = None
         self._running = False
+
+    def _on_window_change(self, app_name: str, window_title: str, bundle_id: str):
+        """Handle window change: log header + capture focus screenshot."""
+        prev_app = self.key_logger._current_app_name
+        self.key_logger.on_window_activated(app_name, window_title, bundle_id)
+        if prev_app and prev_app != app_name:
+            self.mouse_capture.capture_focus(
+                window_info=(app_name, window_title, bundle_id),
+            )
 
     def start(self):
         """Start all listeners."""

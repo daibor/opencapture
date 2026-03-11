@@ -101,6 +101,8 @@ class ReportGenerator:
             info["action"] = "dblclick"
         elif stem.startswith("drag_"):
             info["action"] = "drag"
+        elif stem.startswith("focus_"):
+            info["action"] = "focus"
 
         # Parse time (HHmmss_ms)
         time_match = re.search(r'_(\d{6})_(\d{3})_', stem)
@@ -138,12 +140,15 @@ class ReportGenerator:
             "click": "Click",
             "dblclick": "Double-click",
             "drag": "Drag",
+            "focus": "Focus",
             "unknown": "Action",
         }
         return mapping.get(action, action)
 
     def _format_position(self, info: Dict[str, Any]) -> str:
         """Format position information"""
+        if info["action"] == "focus":
+            return ""
         if info["action"] == "drag" and info.get("x2") is not None:
             return f"({info['x']}, {info['y']}) → ({info['x2']}, {info['y2']})"
         elif info.get("x") is not None:

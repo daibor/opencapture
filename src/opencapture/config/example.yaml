@@ -119,6 +119,14 @@ prompts:
       2. Purpose of the drag (text selection, file move, window resize, etc.)
       3. Operation context
 
+    # Window focus change (user switched to this app)
+    focus: |
+      Analyze this screenshot. The user just switched to this application.
+      Briefly describe:
+      1. The application and its current state
+      2. What content is visible
+      3. Likely reason for switching to this app
+
     # Default analysis (when action type is unknown)
     default: |
       Analyze this screenshot.

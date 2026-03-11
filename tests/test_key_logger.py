@@ -164,17 +164,8 @@ class TestClustering:
 # ---------------------------------------------------------------------------
 
 class TestWindowChange:
-    def test_on_window_activated_defers_header(self, logger, tmp_path):
-        """Header is NOT written on window activation alone (deferred)."""
+    def test_on_window_activated_writes_header(self, logger, tmp_path):
         logger.on_window_activated("Safari", "Google", "com.apple.Safari")
-
-        text = _read_log(tmp_path)
-        assert text == "", "header should be deferred until activity"
-
-    def test_on_window_activated_writes_header_on_activity(self, logger, tmp_path):
-        """Header appears once actual activity triggers it."""
-        logger.on_window_activated("Safari", "Google", "com.apple.Safari")
-        logger.log_screenshot("click_test.webp", "click", 100, 200)
 
         text = _read_log(tmp_path)
         assert "Safari" in text
@@ -183,7 +174,6 @@ class TestWindowChange:
 
     def test_on_window_activated_no_title(self, logger, tmp_path):
         logger.on_window_activated("Finder", "", "com.apple.finder")
-        logger.log_screenshot("click_test.webp", "click", 100, 200)
 
         text = _read_log(tmp_path)
         assert "Finder" in text
@@ -201,11 +191,10 @@ class TestWindowChange:
     def test_same_app_no_duplicate_header(self, logger, tmp_path):
         logger.on_window_activated("Safari", "Tab1", "com.apple.Safari")
         logger.on_window_activated("Safari", "Tab2", "com.apple.Safari")
-        logger.log_screenshot("click_test.webp", "click", 100, 200)
 
         text = _read_log(tmp_path)
         # Same app name → header line written only once
-        header_lines = [l for l in text.splitlines() if l.strip().startswith("[") and "Safari" in l]
+        header_lines = [l for l in text.splitlines() if l.strip().startswith("[") and "Safari |" in l]
         assert len(header_lines) == 1
 
     def test_key_after_window_switch_new_cluster(self, logger, tmp_path, patch_backend):

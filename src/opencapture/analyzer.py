@@ -289,6 +289,8 @@ class Analyzer:
             info["action"] = "dblclick"
         elif filename.startswith("drag_"):
             info["action"] = "drag"
+        elif filename.startswith("focus_"):
+            info["action"] = "focus"
 
         # Parse coordinates
         x_match = re.search(r'_x(-?\d+)', filename)
